@@ -94,6 +94,15 @@ const main = async (): Promise<void> => {
       `writes=${config.allowWrites ? "ENABLED" : "disabled"})`,
   );
 
+  for (const issue of config.issues) stderrLogger.warn(`  config: ${issue}`);
+
+  if (config.invalidMode) {
+    stderrLogger.warn(
+      `  UNIFI_MODE="${config.invalidMode}" is not recognised — ignored, using mode=${config.mode}. ` +
+        `Accepted: unifios (aka local, console, unifi-os), cloud (aka remote), classic (aka self-hosted).`,
+    );
+  }
+
   if (probe.unreachable) {
     stderrLogger.warn(
       `  console unreachable at startup (${probe.unreachable}) — tools were registered for the ` +

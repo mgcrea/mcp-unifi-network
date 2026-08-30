@@ -102,57 +102,76 @@ describe("mode inference", () => {
     });
   });
 
-  it("rejects an unknown mode", () => {
-    expect(() => inferMode({ UNIFI_MODE: "wat" }, {})).toThrow(/UNIFI_MODE/);
+  it("falls back instead of rejecting an unknown mode", () => {
+    // Superseded on purpose: this used to throw. See the UNIFI_MODE block below.
+    expect(inferMode({ UNIFI_MODE: "wat" }, {})).toMatchObject({
+      mode: "unifios",
+      source: "invalid",
+      invalidMode: "wat",
+    });
   });
 });
 
-describe("contradiction rules", () => {
-  it("refuses insecure TLS against the cloud proxy", () => {
-    expect(() =>
-      loadConfig({ UNIFI_MODE: "cloud", UNIFI_CONSOLE_ID: "c1", UNIFI_INSECURE_TLS: "1" }, ABSENT),
-    ).toThrow(/valid certificate/);
-  });
+describe("contradictions are resolved, never fatal", () => {
+  // Each of these used to throw from loadConfig, which exits the process and
+  // shows in the client as a bare "Connection closed" with stderr swallowed.
+  // Every one has an obvious safe resolution, so it is applied and reported.
 
-  it("refuses cloud mode with a key but no console id", () => {
-    expect(() => loadConfig({ UNIFI_MODE: "cloud", UNIFI_API_KEY: "k" }, ABSENT)).toThrow(
-      /UNIFI_CONSOLE_ID/,
+  it("ignores insecure TLS in cloud mode", () => {
+    const c = loadConfig(
+      { UNIFI_MODE: "cloud", UNIFI_CONSOLE_ID: "c1", UNIFI_API_KEY: "k", UNIFI_INSECURE_TLS: "1" },
+      ABSENT,
     );
+    expect(c.insecureTls).toBe(false);
+    expect(c.issues.join(" ")).toContain("valid certificate");
+    expect(integrationReady(c)).toBe(true);
   });
 
-  it("refuses the legacy tier without credentials for it", () => {
-    expect(() => loadConfig({ UNIFI_HOST: "10.0.0.1", UNIFI_ENABLE_LEGACY: "1" }, ABSENT)).toThrow(
-      /UNIFI_USERNAME/,
+  it("ignores a host in cloud mode", () => {
+    const c = loadConfig(
+      { UNIFI_MODE: "cloud", UNIFI_CONSOLE_ID: "c1", UNIFI_API_KEY: "k", UNIFI_HOST: "10.0.0.1" },
+      ABSENT,
     );
+    expect(c.host).toBeUndefined();
+    expect(c.issues.join(" ")).toContain("UNIFI_HOST was ignored");
   });
 
-  it("refuses the legacy tier through the cloud proxy", () => {
-    expect(() =>
-      loadConfig(
-        {
-          UNIFI_MODE: "cloud",
-          UNIFI_CONSOLE_ID: "c1",
-          UNIFI_ENABLE_LEGACY: "1",
-          UNIFI_USERNAME: "a",
-          UNIFI_PASSWORD: "b",
-        },
-        ABSENT,
-      ),
-    ).toThrow(/not reachable through/);
+  it("ignores the legacy tier in cloud mode", () => {
+    const c = loadConfig(
+      {
+        UNIFI_MODE: "cloud",
+        UNIFI_CONSOLE_ID: "c1",
+        UNIFI_API_KEY: "k",
+        UNIFI_ENABLE_LEGACY: "1",
+        UNIFI_USERNAME: "a",
+        UNIFI_PASSWORD: "b",
+      },
+      ABSENT,
+    );
+    expect(c.enableLegacy).toBe(false);
+    expect(legacyReady(c)).toBe(false);
   });
 
-  it("refuses an API key against a classic controller, which serves no such API", () => {
-    expect(() =>
-      loadConfig({ UNIFI_MODE: "classic", UNIFI_HOST: "10.0.0.1", UNIFI_API_KEY: "k" }, ABSENT),
-    ).toThrow(/UniFi OS only/);
+  it("ignores an API key on a classic controller", () => {
+    const c = loadConfig(
+      { UNIFI_MODE: "classic", UNIFI_HOST: "10.0.0.1", UNIFI_API_KEY: "k" },
+      ABSENT,
+    );
+    expect(c.apiKey).toBeUndefined();
+    expect(c.issues.join(" ")).toContain("UniFi OS only");
   });
 
-  it("refuses credentials with no host to send them to", () => {
-    expect(() => loadConfig({ UNIFI_API_KEY: "k" }, ABSENT)).toThrow(/UNIFI_HOST/);
+  it("reports an incomplete config without exiting", () => {
+    // The case hit in practice: a key with no host to send it to.
+    const c = loadConfig({ UNIFI_API_KEY: "k" }, ABSENT);
+    expect(c.issues.join(" ")).toContain("UNIFI_HOST is not set");
+    expect(isConfigured(c)).toBe(false);
+    expect(setupInstructions(c).join(" ")).toContain("UNIFI_HOST");
   });
 
-  it("stays silent when nothing contradicts anything", () => {
-    expect(() => loadConfig({ UNIFI_HOST: "10.0.0.1", UNIFI_API_KEY: "k" }, ABSENT)).not.toThrow();
+  it("says nothing when nothing contradicts anything", () => {
+    const c = loadConfig({ UNIFI_HOST: "10.0.0.1", UNIFI_API_KEY: "k" }, ABSENT);
+    expect(c.issues).toEqual([]);
   });
 });
 
@@ -197,5 +216,44 @@ describe("derived URLs and readiness", () => {
     // The two gates are genuinely independent.
     expect(legacyReady(config)).toBe(true);
     expect(isConfigured(config)).toBe(true);
+  });
+});
+
+describe("UNIFI_MODE", () => {
+  it("accepts the synonyms people actually type", () => {
+    for (const [input, expected] of [
+      ["local", "unifios"],
+      ["console", "unifios"],
+      ["unifi-os", "unifios"],
+      ["UniFiOS", "unifios"],
+      ["remote", "cloud"],
+      ["self-hosted", "classic"],
+    ] as const) {
+      expect(inferMode({ UNIFI_MODE: input }, {})).toMatchObject({ mode: expected });
+    }
+  });
+
+  it("does not exit on an unrecognised mode", () => {
+    // It used to throw, which surfaces in the client as a bare "Connection
+    // closed" with stderr swallowed — the exact failure rule 2 exists to
+    // prevent, reached from a different direction.
+    const config = loadConfig(
+      { UNIFI_MODE: "wat", UNIFI_HOST: "10.0.0.1", UNIFI_API_KEY: "k" },
+      ABSENT,
+    );
+    expect(config.mode).toBe("unifios");
+    expect(config.modeSource).toBe("invalid");
+    expect(config.invalidMode).toBe("wat");
+    expect(integrationReady(config)).toBe(true);
+    // And it says so rather than staying silent about it.
+    expect(setupInstructions(config).join(" ")).toContain('UNIFI_MODE="wat"');
+  });
+
+  it("still infers cloud from a console id when the mode is nonsense", () => {
+    const config = loadConfig(
+      { UNIFI_MODE: "nope", UNIFI_CONSOLE_ID: "c1", UNIFI_API_KEY: "k" },
+      ABSENT,
+    );
+    expect(config.mode).toBe("cloud");
   });
 });

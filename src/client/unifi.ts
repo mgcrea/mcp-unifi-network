@@ -186,17 +186,23 @@ export class UnifiClient {
   }
 
   /**
-   * Follow `offset` pagination until the collection is exhausted, bounded by
-   * BOTH a page count and an item count. An unbounded loop against a large site
-   * is how a single tool call fills a context window.
+   * Follow `offset` pagination until the collection is exhausted or `limit`
+   * items have been collected.
+   *
+   * `limit` is a cap on ITEMS RETURNED, which is what its tool description
+   * promises and what a caller asking for 4 devices expects. It previously set
+   * the page size, with the item cap derived as `limit * maxPages` — so
+   * `limit: 4` against a 12-device site returned all 12. The page size is now
+   * derived from the cap instead, never the other way round.
    */
   async listAll<T = unknown>(
     path: string,
     query: Query = {},
     opts: { limit?: number; maxItems?: number } = {},
   ): Promise<{ data: T[]; totalCount: number; truncated: boolean }> {
-    const limit = Math.min(opts.limit ?? this.pageLimit, 200);
-    const maxItems = opts.maxItems ?? limit * this.maxPages;
+    const maxItems = opts.maxItems ?? opts.limit ?? this.pageLimit;
+    // The API rejects a page above 200, so a larger cap is fetched across pages.
+    const limit = Math.min(maxItems, 200);
     const data: T[] = [];
     let offset = 0;
     let totalCount = 0;

@@ -29,6 +29,9 @@ export const registerStatusTool = (server: McpServer, ctx: ToolContext): void =>
         return {
           configured,
           mode: config.mode,
+          ...(config.invalidMode
+            ? { mode_warning: `UNIFI_MODE="${config.invalidMode}" was not recognised and ignored.` }
+            : {}),
           host: config.host ?? null,
           integration: {
             enabled: integrationReady(config),
@@ -59,6 +62,7 @@ export const registerStatusTool = (server: McpServer, ctx: ToolContext): void =>
               : {}),
             sites: probe.sites.length,
           },
+          ...(config.issues.length > 0 ? { config_issues: config.issues } : {}),
           site_default: config.site ?? null,
           writes: config.allowWrites ? "enabled" : "disabled",
           tls: config.insecureTls ? "INSECURE (verification disabled)" : "verified",

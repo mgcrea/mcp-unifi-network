@@ -95,6 +95,25 @@ describe("UnifiClient pagination", () => {
     expect(result.truncated).toBe(false);
   });
 
+  it("treats limit as a cap on items returned, not as a page size", async () => {
+    // Regression: `limit` used to set the page size with the item cap derived as
+    // limit * maxPages, so asking for 4 devices on a 12-device site returned 12.
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(
+        page(
+          Array.from({ length: 4 }, (_, i) => ({ id: i })),
+          12,
+          0,
+        ),
+      ),
+    );
+    const result = await makeClient(fetchMock).listAll("/sites/x/devices", {}, { limit: 4 });
+    expect(result.data).toHaveLength(4);
+    expect(result.totalCount).toBe(12);
+    expect(result.truncated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("stops at maxItems and says so, rather than filling the context window", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(page([{ id: 1 }], 500, 0)));
     const client = new UnifiClient({

@@ -38,6 +38,11 @@ from the environment or from `~/.config/unifi/config.json`, which is warned abou
 group-readable. The legacy session cookie is a full console-admin credential and is held **in
 memory only** — never written to disk. Nothing is sent anywhere but your console.
 
+**Configuration never kills the server.** A contradictory setting is resolved to the safe option
+and reported through the startup banner and `unifi_auth_status`, rather than throwing — a server
+that exits at startup appears in the client as a bare `Connection closed` with stderr swallowed,
+taking its own explanation with it.
+
 **Blast radius.** With the defaults, this server can only read. Turning on `UNIFI_ALLOW_WRITES`
 adds: restart a device, power-cycle a PoE port, authorize and unauthorize guest access, create
 and delete vouchers, and — with the legacy tier — block, unblock and reconnect clients. Every

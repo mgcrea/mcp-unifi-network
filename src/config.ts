@@ -11,6 +11,32 @@ export type Mode = (typeof MODES)[number];
 const CLOUD_BASE = "https://api.ui.com/v1/connector/consoles";
 
 /**
+ * What people actually type. "unifios" is the vendor's word for the platform,
+ * but the distinction a user is making is local-versus-cloud, so `local` is the
+ * obvious guess and rejecting it is a self-inflicted support question.
+ */
+const MODE_ALIASES: Record<string, Mode> = {
+  local: "unifios",
+  console: "unifios",
+  "unifi-os": "unifios",
+  unifi_os: "unifios",
+  os: "unifios",
+  remote: "cloud",
+  "site-manager": "cloud",
+  sitemanager: "cloud",
+  controller: "classic",
+  "self-hosted": "classic",
+  selfhosted: "classic",
+};
+
+/** Resolve a user-supplied mode, accepting the common synonyms. */
+export const normalizeMode = (value: string): Mode | undefined => {
+  const key = value.trim().toLowerCase();
+  if ((MODES as readonly string[]).includes(key)) return key as Mode;
+  return MODE_ALIASES[key];
+};
+
+/**
  * Both spellings exist in the wild — most builds mount the Integration API at
  * `/integration/v1`, a few at `/integrations/v1`. `probeConsole` negotiates
  * which one a given console serves; this is the order it tries.
@@ -79,7 +105,19 @@ const ConfigSchema = z
      * tell us whether the user chose it — and a contradiction rule must only
      * fire on an actual choice.
      */
-    modeSource: z.enum(["explicit", "inferred", "default"]).default("default"),
+    modeSource: z.enum(["explicit", "inferred", "default", "invalid"]).default("default"),
+    /** The rejected UNIFI_MODE value, kept so it can be reported rather than thrown. */
+    invalidMode: z.string().optional(),
+    /**
+     * Contradictions found and resolved at load time, in plain English.
+     *
+     * These used to be zod issues, which made `loadConfig` throw and the process
+     * exit — surfacing in the client as a bare "Connection closed" with stderr
+     * swallowed, so the one message explaining the problem never arrived. Every
+     * one of them has an obvious safe resolution, so the resolution is applied
+     * and recorded here, then reported by the banner and unifi_auth_status.
+     */
+    issues: z.array(z.string()).default([]),
 
     host: z.string().min(1).optional(),
     port: z.number().int().min(1).max(65535).optional(),
@@ -112,89 +150,95 @@ const ConfigSchema = z
     probeTimeoutMs: z.number().int().min(250).max(30_000).default(3_000),
   })
   .strict()
-  .superRefine((cfg, ctx) => {
-    // Every rule below fires ONLY on a contradiction between two values the user
-    // actually supplied. Absence is a state the server reports through
-    // unifi_auth_status; it is never an error here, because a throw becomes a
-    // bare "Connection closed" in the client with stderr swallowed — and the one
-    // message that would have explained what to configure never reaches anyone.
+  .transform(resolveConflicts);
 
-    if (cfg.insecureTls && cfg.mode === "cloud") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["insecureTls"],
-        message:
-          "UNIFI_INSECURE_TLS cannot be combined with UNIFI_MODE=cloud — api.ui.com presents a " +
-          "valid certificate, so disabling verification removes protection and gains nothing. " +
-          "Unset UNIFI_INSECURE_TLS.",
-      });
-    }
+type RawConfig = {
+  mode: Mode;
+  modeSource: "explicit" | "inferred" | "default" | "invalid";
+  invalidMode?: string | undefined;
+  host?: string | undefined;
+  port?: number | undefined;
+  apiKey?: string | undefined;
+  consoleId?: string | undefined;
+  site?: string | undefined;
+  appVersion?: string | undefined;
+  allowWrites: boolean;
+  insecureTls: boolean;
+  enableLegacy: boolean;
+  username?: string | undefined;
+  password?: string | undefined;
+  maxRetries: number;
+  pageLimit: number;
+  maxPages: number;
+  probeTimeoutMs: number;
+  issues: string[];
+};
 
-    // Guarded on apiKey: with nothing configured at all this must stay silent.
-    if (cfg.mode === "cloud" && cfg.apiKey && !cfg.consoleId) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["consoleId"],
-        message:
-          "UNIFI_MODE=cloud requires UNIFI_CONSOLE_ID — the console id in its unifi.ui.com URL. " +
-          "Without it there is no proxy path to address.",
-      });
-    }
+/**
+ * Apply the safe resolution for each contradictory combination and record what
+ * was done. Nothing here throws: an MCP server that exits at startup takes its
+ * own explanation with it.
+ */
+function resolveConflicts(cfg: RawConfig): RawConfig {
+  const issues: string[] = [...cfg.issues];
+  const out = { ...cfg };
 
-    if (cfg.mode === "cloud" && cfg.modeSource === "explicit" && cfg.host) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["host"],
-        message:
-          "UNIFI_HOST has no meaning with UNIFI_MODE=cloud — requests go to api.ui.com. " +
-          "Unset one of the two so it is clear which console is being addressed.",
-      });
-    }
+  if (out.insecureTls && out.mode === "cloud") {
+    out.insecureTls = false;
+    issues.push(
+      "UNIFI_INSECURE_TLS was ignored: api.ui.com presents a valid certificate, so disabling " +
+        "verification in cloud mode removes protection and gains nothing.",
+    );
+  }
 
-    // enableLegacy defaults to false, so `true` is always an explicit request.
-    if (cfg.enableLegacy && cfg.mode === "cloud") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["enableLegacy"],
-        message:
-          "The legacy controller API is not reachable through the Site Manager connector proxy. " +
-          "Unset UNIFI_ENABLE_LEGACY, or use UNIFI_MODE=unifios against the console directly.",
-      });
-    }
+  if (out.mode === "cloud" && out.modeSource === "explicit" && out.host) {
+    out.host = undefined;
+    issues.push(
+      "UNIFI_HOST was ignored: cloud mode addresses the console through api.ui.com, so the " +
+        "host has no meaning. Unset one of the two to make the intent explicit.",
+    );
+  }
 
-    if (cfg.enableLegacy && !(cfg.username && cfg.password)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["password"],
-        message:
-          "UNIFI_ENABLE_LEGACY=1 needs UNIFI_USERNAME and UNIFI_PASSWORD — the legacy API " +
-          "authenticates with a cookie session, not with UNIFI_API_KEY. Use a LOCAL console " +
-          "account: Ubiquiti SSO accounts require MFA and cannot be used unattended.",
-      });
-    }
+  if (out.enableLegacy && out.mode === "cloud") {
+    out.enableLegacy = false;
+    issues.push(
+      "UNIFI_ENABLE_LEGACY was ignored: the legacy controller API is not reachable through the " +
+        "Site Manager connector proxy. Use UNIFI_MODE=unifios against the console directly.",
+    );
+  }
 
-    if (cfg.mode === "classic" && cfg.apiKey) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["apiKey"],
-        message:
-          "UNIFI_MODE=classic (a self-hosted Network application) does not serve the Integration " +
-          "API at all — that is UniFi OS only, so UNIFI_API_KEY would never be used. Either drop " +
-          "it and set UNIFI_ENABLE_LEGACY=1 with UNIFI_USERNAME/UNIFI_PASSWORD, or switch to " +
-          "UNIFI_MODE=unifios.",
-      });
-    }
+  if (out.mode === "classic" && out.apiKey) {
+    out.apiKey = undefined;
+    issues.push(
+      "UNIFI_API_KEY was ignored: a self-hosted Network application serves no Integration API — " +
+        "that is UniFi OS only. Set UNIFI_ENABLE_LEGACY=1 with UNIFI_USERNAME/UNIFI_PASSWORD.",
+    );
+  }
 
-    if (cfg.mode !== "cloud" && (cfg.apiKey ?? cfg.username) && !cfg.host) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["host"],
-        message:
-          "Credentials were supplied but UNIFI_HOST is not set. Point it at the console, " +
-          "e.g. UNIFI_HOST=192.168.1.1 or UNIFI_HOST=https://unifi.local.",
-      });
-    }
-  });
+  // The remaining cases are INCOMPLETE rather than contradictory. Nothing is
+  // overridden; the affected transport simply stays unready and says why.
+  if (out.mode === "cloud" && out.apiKey && !out.consoleId) {
+    issues.push(
+      "UNIFI_CONSOLE_ID is not set, so cloud mode has no console to address. Find yours with: " +
+        'curl -H "X-API-KEY: $UNIFI_API_KEY" https://api.ui.com/v1/hosts',
+    );
+  }
+  if (out.enableLegacy && !(out.username && out.password)) {
+    issues.push(
+      "UNIFI_ENABLE_LEGACY=1 needs UNIFI_USERNAME and UNIFI_PASSWORD — the legacy API uses a " +
+        "cookie session, not UNIFI_API_KEY. Use a LOCAL console account; SSO accounts need MFA.",
+    );
+  }
+  if (out.mode !== "cloud" && (out.apiKey ?? out.username) && !out.host) {
+    issues.push(
+      "UNIFI_HOST is not set, so there is no console to reach. Point it at one, " +
+        "e.g. UNIFI_HOST=192.168.1.1.",
+    );
+  }
+
+  out.issues = issues;
+  return out;
+}
 
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -289,20 +333,31 @@ export const readConfigFile = (path: string): FileConfig => {
 export const inferMode = (
   env: NodeJS.ProcessEnv,
   file: FileConfig,
-): { mode: Mode; source: Config["modeSource"] } => {
+): { mode: Mode; source: Config["modeSource"]; invalidMode?: string } => {
   const explicit = trimmed(env.UNIFI_MODE) ?? file.mode;
   if (explicit) {
-    const parsed = z.enum(MODES).safeParse(explicit);
-    if (!parsed.success) {
-      throw new Error(`UNIFI_MODE must be one of ${MODES.join(", ")} — got "${explicit}".`);
-    }
-    return { mode: parsed.data, source: "explicit" };
+    const resolved = normalizeMode(explicit);
+    if (resolved) return { mode: resolved, source: "explicit" };
+    // Deliberately NOT a throw. An unrecognised mode used to exit the process,
+    // which surfaces in the client as a bare "Connection closed" with stderr
+    // swallowed — the same failure rule 2 exists to prevent, arrived at from a
+    // different direction. The server comes up on the inferred mode instead and
+    // reports the bad value through the banner and unifi_auth_status.
+    return { mode: inferFromShape(env, file), source: "invalid", invalidMode: explicit };
   }
+  const inferred = inferFromShape(env, file);
+  if (inferred !== "unifios") return { mode: inferred, source: "inferred" };
   if (trimmed(env.UNIFI_CONSOLE_ID) ?? file.consoleId) return { mode: "cloud", source: "inferred" };
+  return { mode: "unifios", source: "default" };
+};
+
+/** Which mode the rest of the configuration implies, ignoring UNIFI_MODE itself. */
+const inferFromShape = (env: NodeJS.ProcessEnv, file: FileConfig): Mode => {
+  if (trimmed(env.UNIFI_CONSOLE_ID) ?? file.consoleId) return "cloud";
   // Port 8443 is the classic controller's tell; UniFi OS answers on 443.
   const port = parseIntOpt(env.UNIFI_PORT) ?? parseHost(env.UNIFI_HOST).port ?? file.port;
-  if (port === 8443) return { mode: "classic", source: "inferred" };
-  return { mode: "unifios", source: "default" };
+  if (port === 8443) return "classic";
+  return "unifios";
 };
 
 // -------------------------------------------------------------- derived URLs --
@@ -367,13 +422,14 @@ export const loadConfig = (
   configPath: string = resolveConfigPath(env),
 ): Config => {
   const file = readConfigFile(configPath);
-  const { mode, source } = inferMode(env, file);
+  const { mode, source, invalidMode } = inferMode(env, file);
   const envHost = parseHost(env.UNIFI_HOST);
   const fileHost = parseHost(file.host);
 
   return ConfigSchema.parse({
     mode,
     modeSource: source,
+    invalidMode,
     host: envHost.host ?? fileHost.host,
     // An explicit port beats one embedded in a pasted URL, which beats the file.
     port: parseIntOpt(env.UNIFI_PORT) ?? envHost.port ?? file.port ?? fileHost.port,
@@ -421,8 +477,16 @@ export const setupInstructions = (
   config: Config,
   configPath: string = resolveConfigPath(),
 ): string[] => {
-  if (isConfigured(config)) return [];
-  const steps: string[] = [];
+  const steps: string[] = [...config.issues];
+  if (config.invalidMode) {
+    steps.push(
+      `UNIFI_MODE="${config.invalidMode}" is not a recognised mode, so it was ignored and ` +
+        `\`${config.mode}\` was inferred instead. Valid values are ${MODES.join(", ")} — and ` +
+        `"local", "console" and "unifi-os" are accepted as synonyms for unifios, "remote" for ` +
+        `cloud, and "self-hosted" for classic.`,
+    );
+  }
+  if (isConfigured(config)) return steps;
 
   if (config.mode === "classic") {
     steps.push(
