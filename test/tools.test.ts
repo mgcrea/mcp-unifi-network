@@ -109,6 +109,25 @@ describe("registration matrix", () => {
     expect(names.filter((n) => n.startsWith("unifi_legacy_"))).toEqual([]);
   });
 
+  // Asserts the WHOLE set, not just the unifi_legacy_ prefixed subset. The
+  // filtered assertion below let two new tools land with no visible diff, which
+  // is the one thing a registration matrix exists to prevent.
+  it("registers exactly this set when the legacy tier is enabled", async () => {
+    const names = await (await connect({ env: LEGACY_ENV })).toolNames();
+    expect(names).toEqual(
+      [
+        ...READ_TOOLS,
+        "unifi_diagnose_client",
+        "unifi_health_check",
+        "unifi_legacy_get_health",
+        "unifi_legacy_list_alarms",
+        "unifi_legacy_list_events",
+        "unifi_legacy_list_known_clients",
+        "unifi_legacy_request",
+      ].toSorted(),
+    );
+  });
+
   it("registers the legacy read tools when the legacy tier is enabled", async () => {
     const names = await (await connect({ env: LEGACY_ENV })).toolNames();
     expect(names.filter((n) => n.startsWith("unifi_legacy_"))).toEqual([
@@ -377,5 +396,145 @@ describe("unifi_legacy_list_known_clients", () => {
   it("separates currently-blocked from ever-blocked", async () => {
     expect((await call({ blocked: "only" })).matched).toBe(1);
     expect((await call({ blocked: "everBlocked" })).matched).toBe(2);
+  });
+});
+
+const LEGACY_KEY_ENV = { ...READY_ENV, UNIFI_ENABLE_LEGACY: "1" };
+const rcOk = (data: unknown[]) => jsonResponse({ meta: { rc: "ok" }, data });
+
+/** Serves the four legacy reads the composite tools fan out to. */
+const legacyServer = async (routes: {
+  user?: unknown[];
+  sta?: unknown[];
+  health?: unknown[];
+  device?: unknown[];
+  wlanconf?: unknown[];
+}) => {
+  const fetchMock = vi.fn(async (url: string) => {
+    const u = String(url);
+    for (const [key, rows] of Object.entries(routes)) {
+      if (u.includes(`/${key.replace("wlanconf", "rest/wlanconf")}`)) return rcOk(rows ?? []);
+    }
+    if (u.includes("/rest/user")) return rcOk(routes.user ?? []);
+    if (u.includes("/stat/sta")) return rcOk(routes.sta ?? []);
+    if (u.includes("/stat/health")) return rcOk(routes.health ?? []);
+    if (u.includes("/stat/device")) return rcOk(routes.device ?? []);
+    if (u.includes("/rest/wlanconf")) return rcOk(routes.wlanconf ?? []);
+    return jsonResponse(page(SITES));
+  });
+  return connect({ env: LEGACY_KEY_ENV, fetchImpl: fetchMock });
+};
+
+describe("unifi_diagnose_client", () => {
+  const MOWER = "14:5d:34:1a:62:da";
+  const USERS = [
+    { mac: "aa:aa:aa:aa:aa:01", name: "Laptop", blocked: true, last_seen: 1_780_000_000 },
+    { mac: "aa:aa:aa:aa:aa:02", name: "Fridge", last_seen: 1_780_000_000 },
+  ];
+
+  const diagnose = async (device: string, sta: string[] = []) =>
+    (await legacyServer({ user: USERS, sta: sta.map((mac) => ({ mac })) })).call(
+      "unifi_diagnose_client",
+      { device },
+    );
+
+  // The case that matters. A device rejected at the 802.11 auth frame never
+  // gets a client record, so "not found" is the EXPECTED appearance of the most
+  // common hard failure, not a dead end. If this degrades to a bare "no match"
+  // the tool has lost its whole reason to exist.
+  it("treats a completely unknown device as a diagnosis, not a shrug", async () => {
+    const res = await diagnose(MOWER);
+    expect(res.found).toBe(false);
+    expect(res.verdict).toBe("absent");
+    expect(res.explanation).toMatch(/orphaned block/i);
+    expect(res.explanation).toMatch(/blocked_sta/);
+    expect(res.explanation).toMatch(/unifi_legacy_unblock_client/);
+    // The remedy is only actionable with the MAC substituted in.
+    expect(res.explanation).toContain(MOWER);
+    expect(res.explanation).not.toContain("<mac>");
+  });
+
+  it("reports a blocked client as the cause", async () => {
+    const res = await diagnose("Laptop");
+    expect(res.found).toBe(true);
+    expect((res.results as { verdict: string }[])[0]?.verdict).toBe("blocked");
+  });
+
+  it("distinguishes connected from known-but-offline", async () => {
+    const live = await diagnose("Fridge", ["aa:aa:aa:aa:aa:02"]);
+    expect((live.results as { verdict: string }[])[0]?.verdict).toBe("connected");
+    const off = await diagnose("Fridge");
+    expect((off.results as { verdict: string }[])[0]?.verdict).toBe("known_offline");
+  });
+
+  // A MAC typed in any common spelling must reach the canonical roster form, or
+  // the tool answers "absent" for a device sitting right in front of it.
+  it("matches a MAC however it is spelled", async () => {
+    for (const spelling of ["AA:AA:AA:AA:AA:01", "aaaaaaaaaa01", "aa-aa-aa-aa-aa-01"]) {
+      expect((await diagnose(spelling)).found).toBe(true);
+    }
+  });
+});
+
+describe("unifi_health_check", () => {
+  it("reports ok on a clean network", async () => {
+    const server = await legacyServer({ health: [{ subsystem: "wan", status: "ok" }] });
+    const res = await server.call("unifi_health_check", {});
+    expect(res.ok).toBe(true);
+    expect(res.findings).toEqual([]);
+  });
+
+  it("warns on a degraded subsystem and an open SSID, ranking warnings first", async () => {
+    const server = await legacyServer({
+      health: [{ subsystem: "wlan", status: "error", num_disconnected: 2 }],
+      wlanconf: [{ name: "Guest", enabled: true, security: "open" }],
+      device: [{ name: "AP1", state: 1, upgradable: true }],
+    });
+    const res = await server.call("unifi_health_check", {});
+    expect(res.ok).toBe(false);
+    const findings = res.findings as { severity: string }[];
+    expect(findings[0]?.severity).toBe("warn");
+    expect(findings.at(-1)?.severity).toBe("note");
+    expect(JSON.stringify(findings)).toMatch(/OPEN \(no encryption\)/);
+  });
+
+  // A paused SSID is invisible from the client side: anything provisioned onto
+  // it simply stops finding a network.
+  it("surfaces a disabled SSID", async () => {
+    const server = await legacyServer({ wlanconf: [{ name: "JavaPublic", enabled: false }] });
+    const res = await server.call("unifi_health_check", {});
+    expect(JSON.stringify(res.findings)).toMatch(/disabled or paused/);
+  });
+});
+
+describe("new-device detection and the troubleshooting resource", () => {
+  it("firstSeenWithinDays finds recent arrivals, newest first", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const day = 86_400;
+    const server = await legacyServer({
+      user: [
+        { mac: "aa:00:00:00:00:01", name: "Old", first_seen: now - 400 * day, last_seen: now },
+        { mac: "aa:00:00:00:00:02", name: "New", first_seen: now - 2 * day, last_seen: now },
+        { mac: "aa:00:00:00:00:03", name: "Newest", first_seen: now - day, last_seen: now },
+      ],
+    });
+    const res = await server.call("unifi_legacy_list_known_clients", { firstSeenWithinDays: 7 });
+    // A device online for a year is not "new" however recently it was seen —
+    // the whole point of keying off first sighting rather than last.
+    expect((res.data as { name: string }[]).map((r) => r.name)).toEqual(["Newest", "New"]);
+  });
+
+  it("serves the troubleshooting notes even with no credentials", async () => {
+    // Unconditional on purpose: the notes explain failures that happen when
+    // nothing is configured, so gating them hides them exactly when needed.
+    const server = await connect({ env: {}, probe: ASSUMED_PROBE });
+    const list = await server.client.listResources();
+    expect(list.resources.map((r) => r.uri)).toContain("unifi://troubleshooting");
+
+    const read = await server.client.readResource({ uri: "unifi://troubleshooting" });
+    const text = String((read.contents[0] as { text: string }).text);
+    for (const trap of ["blocked_sta", "NOT_A_REAL_VALUE", "last ASSOCIATION", "live roster"]) {
+      expect(text).toContain(trap);
+    }
   });
 });

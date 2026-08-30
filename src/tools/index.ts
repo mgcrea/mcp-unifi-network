@@ -8,7 +8,9 @@ import { integrationReady, legacyReady } from "#/config";
 import type { Config } from "#/config";
 import { registerClientTools } from "#/tools/clients";
 import { registerDeviceTools } from "#/tools/devices";
+import { registerDiagnoseTool } from "#/tools/diagnose";
 import { registerFirewallTools } from "#/tools/firewall";
+import { registerHealthTool } from "#/tools/health";
 import { registerLegacyRequestTool, registerLegacyTools } from "#/tools/legacy";
 import { registerNetworkTools } from "#/tools/network";
 import { registerRequestTool } from "#/tools/request";
@@ -74,5 +76,10 @@ export const registerTools = (
   if (legacyReady(ctx.config) && opts.legacy) {
     registerLegacyTools(server, opts.legacy, ctx);
     registerLegacyRequestTool(server, opts.legacy, ctx);
+    // Both compose the legacy roster with live state, so they belong to this
+    // gate rather than the Integration one — the historical half is the part
+    // that makes them worth calling, and only this transport has it.
+    registerDiagnoseTool(server, opts.legacy, ctx);
+    registerHealthTool(server, opts.legacy, ctx);
   }
 };

@@ -17,6 +17,7 @@ import {
   legacyReady,
 } from "#/config";
 import type { Config } from "#/config";
+import { registerResources } from "#/resources";
 import { registerTools } from "#/tools/index";
 
 export const SERVER_NAME = BUILD_INFO.name;
@@ -101,6 +102,11 @@ export const createServer = (opts: CreateServerOptions): CreatedServer => {
           ...(opts.logger ? { logger: opts.logger } : {}),
         })
       : undefined;
+
+  // Unconditional: the notes explain failures that occur when nothing is
+  // configured, so gating them behind readiness would hide them exactly when
+  // they are needed.
+  registerResources(server);
 
   registerTools(
     server,

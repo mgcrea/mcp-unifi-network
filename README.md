@@ -137,14 +137,50 @@ flag alone is enough:
 
 | Tool                              | What it does                                           |              |
 | --------------------------------- | ------------------------------------------------------ | ------------ |
-| `unifi_legacy_list_known_clients` | Every client ever seen, and which are blocked          |              |
-| `unifi_legacy_get_health`         | Per-subsystem health — the "is anything wrong" call    |              |
+| `unifi_diagnose_client`           | "Why will this device not connect?" — one call, with a verdict |    |
+| `unifi_health_check`              | "Is my network OK?" — ranked findings across every subsystem   |    |
+| `unifi_legacy_list_known_clients` | Every client ever seen, which are blocked, and what is new     |    |
+| `unifi_legacy_get_health`         | Raw per-subsystem health                               |              |
 | `unifi_legacy_list_events`        | Controller event log                                   |              |
 | `unifi_legacy_list_alarms`        | Open alarms                                            |              |
 | `unifi_legacy_request`            | Escape hatch: port forwarding, adoption, upgrades, DPI | W ⚠️ non-GET |
 | `unifi_legacy_unblock_client`     | Let a blocked client back on                           | W            |
 | `unifi_legacy_block_client`       | Block a client by MAC                                  | W ⚠️         |
 | `unifi_legacy_reconnect_client`   | Kick a client so it reassociates                       | W ⚠️         |
+
+## Resources
+
+`unifi://troubleshooting` — field notes on the API behaviours that return a
+successful, plausible, **wrong** answer. Registered unconditionally, including
+with no credentials, because several of them describe failures that occur before
+anything is configured. Read it before concluding that a device is absent, that
+nothing is blocked, or that a client has been offline for months.
+
+## A worked example: a device that will not connect
+
+```
+unifi_diagnose_client { "device": "husqvarna" }
+  → { found: false, verdict: "absent", explanation: "NOT KNOWN TO THIS CONSOLE AT ALL …" }
+```
+
+`absent` is a diagnosis, not a dead end. A client record is written on
+*association*, which happens before the password is checked — so a device refused
+at the 802.11 authentication frame appears nowhere in the API: no record, no
+event, nothing. The usual cause is an **orphaned block**: blocking a client
+writes its MAC to `/etc/persistent/cfg/blocked_sta` on every AP, and deleting the
+client from the controller afterwards leaves that file behind with no way to undo
+it in the UI. It survives reboots *and* re-provisioning.
+
+`unifi_legacy_unblock_client` is safe on a MAC the controller has never heard of
+and clears exactly this. To confirm before or after, read the AP logs the gateway
+already collects:
+
+```bash
+ssh <gateway> 'grep -a "<mac>" /srv/unifi/logs/remote/*.log | tail -20'
+```
+
+`auth: disallowed by ACL` is a block. Silence means the device never reached the
+AP at all.
 
 ## A worked example: find and reboot a stuck access point
 

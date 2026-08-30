@@ -120,8 +120,9 @@ export const registerLegacyTools = (
         "are not currently connected: `unifi_list_clients` returns the live roster only, so a " +
         "blocked or long-absent device is invisible to it. Use this to find out why a device " +
         'will not connect, to audit what has been blocked, or to find "that thing I saw last ' +
-        'summer". The reply always carries `blockedCount` for the whole site regardless of ' +
-        "which filters you pass, so one call settles whether anything is blocked at all.",
+        'summer". `firstSeenWithinDays` answers "did anything NEW join recently?". The reply ' +
+        "always carries `blockedCount` for the whole site regardless of which filters you pass, " +
+        "so one call settles whether anything is blocked at all.",
       inputSchema: {
         site: siteArg,
         blocked: z
@@ -160,6 +161,19 @@ export const registerLegacyTools = (
           .min(0)
           .optional()
           .describe("Only clients seen within this many days. Connected clients always match."),
+        firstSeenWithinDays: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            "Only clients the console had never seen before this many days ago — i.e. NEW " +
+              'devices. This is the one to reach for on "did anything new join my network?": ' +
+              "unlike the other filters it keys off first sighting, so a device that joined " +
+              "last night and has been online since still matches. Expect noise from phones " +
+              "using MAC randomisation, which mint a fresh address per network; those show as " +
+              "unnamed with an empty vendor.",
+          ),
         limit: z
           .number()
           .int()
@@ -174,7 +188,7 @@ export const registerLegacyTools = (
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ site, blocked, search, notSeenForDays, seenWithinDays, limit }) =>
+    async ({ site, blocked, search, notSeenForDays, seenWithinDays, firstSeenWithinDays, limit }) =>
       wrap(async () => {
         // `rest/user` is deliberate over the newer v2 `clients/history`: it is
         // the complete roster (203 vs 162 on the console this was built
@@ -222,17 +236,31 @@ export const registerLegacyTools = (
           if (seenWithinDays !== undefined && (age === undefined || age > seenWithinDays)) {
             return false;
           }
+          if (firstSeenWithinDays !== undefined) {
+            const first =
+              typeof row.firstSeen === "string" ? Date.parse(row.firstSeen) : Number.NaN;
+            if (Number.isNaN(first)) return false;
+            if ((now - first) / 86_400_000 > firstSeenWithinDays) return false;
+          }
           if (!needle) return true;
           return ["name", "mac", "oui", "fingerprint"]
             .map((key) => String(row[key] ?? "").toLowerCase())
             .some((value) => value.includes(needle));
         });
 
-        matched.sort(
-          (a, b) =>
-            (typeof a.daysSinceSeen === "number" ? a.daysSinceSeen : Number.MAX_SAFE_INTEGER) -
-            (typeof b.daysSinceSeen === "number" ? b.daysSinceSeen : Number.MAX_SAFE_INTEGER),
-        );
+        // Newest-first when the question is "what is new", most-recently-seen
+        // first otherwise. Sorting by the wrong key buries the answer below the
+        // limit, which reads as "nothing found".
+        if (firstSeenWithinDays !== undefined) {
+          matched.sort(
+            (a, b) => Date.parse(String(b.firstSeen ?? 0)) - Date.parse(String(a.firstSeen ?? 0)),
+          );
+        } else
+          matched.sort(
+            (a, b) =>
+              (typeof a.daysSinceSeen === "number" ? a.daysSinceSeen : Number.MAX_SAFE_INTEGER) -
+              (typeof b.daysSinceSeen === "number" ? b.daysSinceSeen : Number.MAX_SAFE_INTEGER),
+          );
 
         const page = matched.slice(0, limit);
         return {

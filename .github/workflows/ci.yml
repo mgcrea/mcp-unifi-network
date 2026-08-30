@@ -75,8 +75,11 @@ jobs:
           ! grep -qE '"name":"unifi_(restart_device|delete_vouchers|create_vouchers)"' /tmp/tools.json \
             || { echo "write tools leaked without UNIFI_ALLOW_WRITES"; exit 1; }
           # The legacy transport is opt-in and must stay invisible until it is.
-          ! grep -q '"name":"unifi_legacy_' /tmp/tools.json \
-            || { echo "legacy tools leaked without UNIFI_ENABLE_LEGACY"; exit 1; }
+          # unifi_diagnose_client and unifi_health_check ride the same gate
+          # without carrying the prefix, so they are named explicitly — a
+          # prefix-only check silently stopped covering them.
+          ! grep -qE '"name":"(unifi_legacy_|unifi_diagnose_client|unifi_health_check)' /tmp/tools.json \
+            || { echo "legacy-tier tools leaked without UNIFI_ENABLE_LEGACY"; exit 1; }
 
   publish-npm:
     name: Publish to npm
