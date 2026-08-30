@@ -1,5 +1,8 @@
 # @mgcrea/mcp-unifi-network
 
+[![npm version](https://img.shields.io/npm/v/@mgcrea/mcp-unifi-network?style=for-the-badge)](https://www.npmjs.com/package/@mgcrea/mcp-unifi-network)
+[![build status](https://img.shields.io/github/actions/workflow/status/mgcrea/mcp-unifi-network/ci.yml?style=for-the-badge)](https://github.com/mgcrea/mcp-unifi-network/actions)
+
 Model Context Protocol server for the UniFi Network API — sites, devices, clients, hotspot
 vouchers, networks, WiFi and firewall configuration, plus an optional tier for the parts the
 official API does not cover. **Read-only by default:** the mutating tools are not registered at
@@ -71,6 +74,12 @@ locks you out of the console you are managing it through, with no undo.
 so a one-off `UNIFI_ALLOW_WRITES=0` overrides a file that says `true` without discarding the rest.
 
 ## Quick start
+
+```bash
+npx -y @mgcrea/mcp-unifi-network
+```
+
+or from source:
 
 ```bash
 pnpm install && pnpm build
@@ -221,6 +230,13 @@ pnpm dev            # tsdown --watch
 pnpm test           # vitest, offline, no credentials needed
 pnpm typecheck
 pnpm lint && pnpm format
+```
+
+Release:
+
+```bash
+pnpm dlx release-it        # bump, commit, tag
+git push --follow-tags     # CI publishes to npm and cuts the GitHub release
 ```
 
 The offline suite covers the registration matrix, the confirm gates, site resolution and both
