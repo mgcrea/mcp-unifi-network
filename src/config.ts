@@ -432,8 +432,12 @@ export const setupInstructions = (
     );
   } else if (!config.apiKey) {
     steps.push(
-      "Create an API key in the UniFi console UI: Settings → Control Plane → Integrations → " +
-        "Create API Key. It is shown once and never again. Set it as UNIFI_API_KEY.",
+      "Create an API key in the UniFi Network UI. Where it lives moved: on Network 10.6+ " +
+        "`Integrations` is its own item in the LEFT SIDEBAR (a plug icon), not under Settings. " +
+        "On 9.x through early 10.x it is Settings → Control Plane → Integrations; on 8.x, " +
+        "Settings → System → Advanced. Any admin can create one, it is shown once in a popup " +
+        "and can never be viewed again, and creation sometimes errors on the first attempt — " +
+        "retry before concluding anything is wrong. Set it as UNIFI_API_KEY.",
     );
   }
 

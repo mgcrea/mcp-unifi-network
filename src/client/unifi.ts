@@ -231,8 +231,9 @@ export class UnifiClient {
     if (res.status === 401) {
       return (
         `${base} — the API key was rejected. Check UNIFI_API_KEY, and that it was created on ` +
-        `THIS console under Settings → Control Plane → Integrations. Keys are per-console and ` +
-        `are shown only once when created.`
+        `THIS console: keys are per-console and are shown only once. The UI moved — on Network ` +
+        `10.6+ look for "Integrations" as its own item in the left sidebar (plug icon); on ` +
+        `earlier versions it is Settings → Control Plane → Integrations.`
       );
     }
     if (res.status === 403) {

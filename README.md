@@ -182,7 +182,12 @@ real crash is visible there.
 almost always the version gate or the write flag, both of which unregister rather than refuse.
 
 **401 on every call.** The key is per-console and shown only once. Re-create it under
-Settings → Control Plane → Integrations.
+the Network UI. **Where that lives has moved**, which is the usual reason it cannot be found: on
+Network 10.6+ "Integrations" is its own item in the **left sidebar** (plug icon), no longer under
+Settings → Control Plane, which is where 9.x through early 10.x put it (and 8.x used
+Settings → System → Advanced → API). Any admin can create one; it is shown once in a popup and
+never again; and creation sometimes errors on the first attempt, so retry before assuming it is
+broken.
 
 **`fetch failed` / certificate errors.** Self-signed certificate; see Security.
 

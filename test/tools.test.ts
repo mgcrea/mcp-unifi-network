@@ -46,7 +46,11 @@ describe("registration matrix", () => {
 
     const status = await server.call("unifi_auth_status");
     expect(status.configured).toBe(false);
-    expect(JSON.stringify(status.setup)).toContain("Control Plane → Integrations");
+    const setup = JSON.stringify(status.setup);
+    expect(setup).toContain("Integrations");
+    // The UI moved in Network 10.6; the guidance has to name where it is now,
+    // not only where it used to be.
+    expect(setup).toContain("LEFT SIDEBAR");
   });
 
   it("registers the read tools and no write tools by default", async () => {
