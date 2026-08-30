@@ -150,28 +150,36 @@ All of these are baked into the tool descriptions, but they explain the shape of
 
 1. **There are two kinds of API key.** A cloud key from `unifi.ui.com` is not a local console
    key, and using one against a local console gives a 401 that looks like a typo. See Configure.
-2. **`siteId` is a UUID, not `default`.** A site has three identifiers: the UUID this API's paths
+2. **Cloud mode cannot reach a console the Site Manager API does not list.** `UNIFI_CONSOLE_ID`
+   has to come from `GET https://api.ui.com/v1/hosts`, and that listing is not the same as what
+   unifi.ui.com shows you. A console grouped into a **Fabric** — several consoles (Network,
+   Protect, NAS) presented under one name — appears in the web UI but **not** in `/v1/hosts`,
+   even with `cloudConnected: true` on the console itself. Observed on a UDM-Pro that the portal
+   showed and the API did not, on both `/v1/hosts` and `/ea/hosts`, with no pagination involved.
+   For such a console there is no host id, so cloud mode is unavailable and you need a local
+   Integration key with `UNIFI_MODE=unifios`.
+3. **`siteId` is a UUID, not `default`.** A site has three identifiers: the UUID this API's paths
    take, the legacy 8-character `internalReference` that appears in every controller URL and forum
    post, and a display name. Every tool accepts all three. The legacy tools need the
    `internalReference`, and that translation happens for you too.
-3. **The endpoint set depends on the console's version.** 7 paths in 9.0, 12 in 9.3, 32 in 10.0,
+4. **The endpoint set depends on the console's version.** 7 paths in 9.0, 12 in 9.3, 32 in 10.0,
    44 in 10.3. The server probes `GET /v1/info` at startup and registers accordingly, so the tool
    list can differ between two runs against different consoles. `unifi_get_console_info` says why.
    If the console cannot be reached at startup the server still comes up, assumes the newest
    version, and lets any gap surface as an error naming the version it needs — a visible failure
    beats a silently missing tool.
-4. **Local consoles use self-signed certificates, and pinning one is not enough.** The
+5. **Local consoles use self-signed certificates, and pinning one is not enough.** The
    certificate is issued to `unifi.local` with no IP SAN, so a console addressed by IP fails
    verification however the certificate is trusted — you need a host name too. See Security.
-5. **The classic self-hosted controller has no Integration API.** API keys are UniFi OS only, so
+6. **The classic self-hosted controller has no Integration API.** API keys are UniFi OS only, so
    port 8443 means the legacy tier or nothing. The config refuses the contradictory combination
    rather than failing later at request time.
-6. **The legacy API reports errors with HTTP 200.** `{"meta":{"rc":"error"}}` is a failure however
+7. **The legacy API reports errors with HTTP 200.** `{"meta":{"rc":"error"}}` is a failure however
    healthy the status line looks. That is unwrapped for you in one place.
-7. **Legacy payloads are enormous** — a `stat/device` object declares ~423 fields and one UDM-Pro
+8. **Legacy payloads are enormous** — a `stat/device` object declares ~423 fields and one UDM-Pro
    is 50–150 KB. Legacy responses are projected down, and `unifi_legacy_request` refuses anything
    over 5 MB rather than parsing it. Pass `attrs` and `_limit`.
-8. **Login is rate-limited.** The legacy session is established once per server start and reused;
+9. **Login is rate-limited.** The legacy session is established once per server start and reused;
    a 429 on login is never retried, because retrying deepens the lockout.
 
 ## Troubleshooting
