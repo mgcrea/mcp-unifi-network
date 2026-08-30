@@ -23,7 +23,7 @@ describe("UnifiClient errors", () => {
       jsonResponse({ message: "Missing credentials" }, { status: 401 }),
     );
     await expect(makeClient(fetchMock).get("/sites")).rejects.toThrow(
-      /UNIFI_API_KEY.*control-plane\/integrations/s,
+      /UNIFI_API_KEY.*unifi\.ui\.com/s,
     );
   });
 

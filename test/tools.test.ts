@@ -49,7 +49,10 @@ describe("registration matrix", () => {
     const setup = JSON.stringify(status.setup);
     // Pin the direct URL, not a sidebar description: the sidebar location has
     // changed twice already, the route has not.
+    // Both key types must be named: a cloud key used locally 401s, and that is
+    // the failure people actually hit.
     expect(setup).toContain("/settings/control-plane/integrations");
+    expect(setup).toContain("unifi.ui.com/settings/api-keys");
   });
 
   it("registers the read tools and no write tools by default", async () => {

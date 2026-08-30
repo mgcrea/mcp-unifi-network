@@ -432,15 +432,18 @@ export const setupInstructions = (
     );
   } else if (!config.apiKey) {
     steps.push(
-      "Create an API key in the UniFi Network UI. The reliable way to reach it is the direct " +
-        "URL: https://<console>/network/default/settings/control-plane/integrations — the " +
-        "sidebar location moves between releases and is easy to miss. On Network 10.6 " +
-        '`Control Plane` sits under a heading named after the console (e.g. "UDM Pro") at the ' +
-        "BOTTOM of the settings sidebar, below `System`, which reads as a separate device " +
-        "section rather than part of Settings. Any admin can create a key, not just the owner. " +
-        "It is shown once in a popup and can afterwards only be renamed or deleted, and " +
-        "creation sometimes errors on the first attempt — retry before concluding anything is " +
-        "wrong. Set it as UNIFI_API_KEY.",
+      "There are TWO kinds of UniFi API key and they are not interchangeable. " +
+        "(a) A LOCAL Integration key, created on the console itself at " +
+        "https://<console>/network/default/settings/control-plane/integrations — this is the " +
+        "one UNIFI_MODE=unifios needs. On Network 10.6 `Control Plane` sits under a heading " +
+        "named after the console at the BOTTOM of the settings sidebar, below `System`, which " +
+        "is why it is often reported missing. " +
+        "(b) A CLOUD Site Manager key, created at https://unifi.ui.com/settings/api-keys — this " +
+        "one is REJECTED with a 401 by a console's local API, and is used with UNIFI_MODE=cloud " +
+        "plus UNIFI_CONSOLE_ID. Cloud mode also works behind CGNAT and needs no TLS workaround. " +
+        "Either kind is shown once and can afterwards only be renamed or deleted, any admin can " +
+        "create one, and creation sometimes errors on the first attempt — retry. " +
+        "Set it as UNIFI_API_KEY.",
     );
   }
 

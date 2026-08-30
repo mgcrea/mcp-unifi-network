@@ -231,9 +231,11 @@ export class UnifiClient {
     if (res.status === 401) {
       return (
         `${base} — the API key was rejected. Check UNIFI_API_KEY, and that it was created on ` +
-        `THIS console: keys are per-console and are shown only once. Create one at ` +
-        `https://<console>/network/default/settings/control-plane/integrations — that URL is ` +
-        `stable, while where it appears in the sidebar is not.`
+        `THIS console: keys are per-console and are shown only once. The most common cause is ` +
+        `using a CLOUD key from https://unifi.ui.com/settings/api-keys against a local console — ` +
+        `those are Site Manager keys and the local API always rejects them. Either create a ` +
+        `local key at https://<console>/network/default/settings/control-plane/integrations, or ` +
+        `keep the cloud key and switch to UNIFI_MODE=cloud with UNIFI_CONSOLE_ID.`
       );
     }
     if (res.status === 403) {
