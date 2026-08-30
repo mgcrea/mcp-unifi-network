@@ -117,9 +117,31 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+      # A first publish CANNOT succeed here. Trusted publishing is configured per
+      # package on npmjs.com, and a package that does not exist yet has no
+      # settings page — so the registry treats the request as anonymous and
+      # rejects the PUT with a 404 that says nothing about the real cause.
+      # Publish v1 by hand once (`npm publish --access public`, completing the
+      # 2FA prompt), then configure the trusted publisher; every later tag
+      # publishes from here with provenance.
       - name: Publish 🚀
         if: steps.published.outputs.exists == 'false'
-        run: npm publish --provenance --access public
+        run: |
+          if ! npm publish --provenance --access public; then
+            name=$(node -p "require('./package.json').name")
+            if ! npm view "$name" version >/dev/null 2>&1; then
+              echo "::error::$name has never been published. Trusted publishing cannot make a \
+          first publish: the package has no settings page on which to configure a trusted \
+          publisher, so the registry sees an anonymous request and answers 404 on the PUT. \
+          Run 'npm publish --access public' locally once, then add the trusted publisher at \
+          https://www.npmjs.com/package/$name/access — after that this job works unattended."
+            else
+              echo "::error::Publish failed. If this is a 404 on the PUT, check that the trusted \
+          publisher at https://www.npmjs.com/package/$name/access names owner '${{ github.repository_owner }}', \
+          this repository, and the workflow file 'ci.yml' exactly."
+            fi
+            exit 1
+          fi
 
   github-release:
     name: GitHub Release
