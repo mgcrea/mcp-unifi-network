@@ -223,10 +223,16 @@ function resolveConflicts(cfg: RawConfig): RawConfig {
         'curl -H "X-API-KEY: $UNIFI_API_KEY" https://api.ui.com/v1/hosts',
     );
   }
-  if (out.enableLegacy && !(out.username && out.password)) {
+  if (
+    out.enableLegacy &&
+    !(out.username && out.password) &&
+    !(out.mode === "unifios" && out.apiKey)
+  ) {
     issues.push(
-      "UNIFI_ENABLE_LEGACY=1 needs UNIFI_USERNAME and UNIFI_PASSWORD — the legacy API uses a " +
-        "cookie session, not UNIFI_API_KEY. Use a LOCAL console account; SSO accounts need MFA.",
+      "UNIFI_ENABLE_LEGACY=1 has nothing to authenticate with. On a UniFi OS console a local " +
+        "UNIFI_API_KEY is enough — the console's proxy accepts it on the legacy paths too. " +
+        "Otherwise set UNIFI_USERNAME and UNIFI_PASSWORD (a LOCAL console account; SSO accounts " +
+        "need MFA, which cannot be scripted).",
     );
   }
   if (out.mode !== "cloud" && (out.apiKey ?? out.username) && !out.host) {
@@ -460,11 +466,30 @@ export const loadConfig = (
 export const integrationReady = (config: Config): boolean =>
   config.mode !== "classic" && Boolean(config.apiKey) && Boolean(integrationBaseUrl(config));
 
+/**
+ * How the legacy transport authenticates, or `undefined` when it cannot.
+ *
+ * `apiKey` is the case the original design missed. A UniFi OS console proxies
+ * `/proxy/network/api/...` through the same gateway that serves the Integration
+ * API, and that gateway accepts `X-API-KEY` on BOTH — verified against Network
+ * 10.6.101, where a local key returns `{"meta":{"rc":"ok"}}` from
+ * `/api/s/default/rest/user`. That removes the console admin password from the
+ * common path entirely, which matters: the cookie session is a full-admin
+ * credential that had to sit in plaintext in `.mcp.json` to be usable.
+ *
+ * A username/password still wins when both are present — a self-hosted classic
+ * controller has no key to offer, and an older UniFi OS build may not accept one
+ * on the legacy paths.
+ */
+export const legacyAuthMode = (config: Config): "session" | "apiKey" | undefined => {
+  if (!legacyBaseUrl(config)) return undefined;
+  if (config.username && config.password) return "session";
+  if (config.mode === "unifios" && config.apiKey) return "apiKey";
+  return undefined;
+};
+
 export const legacyReady = (config: Config): boolean =>
-  config.enableLegacy &&
-  Boolean(config.username) &&
-  Boolean(config.password) &&
-  Boolean(legacyBaseUrl(config));
+  config.enableLegacy && legacyAuthMode(config) !== undefined;
 
 export const isConfigured = (config: Config): boolean =>
   integrationReady(config) || legacyReady(config);

@@ -114,6 +114,7 @@ describe("registration matrix", () => {
       "unifi_legacy_get_health",
       "unifi_legacy_list_alarms",
       "unifi_legacy_list_events",
+      "unifi_legacy_list_known_clients",
       "unifi_legacy_request",
     ]);
   });
@@ -332,5 +333,48 @@ describe("responses", () => {
     const info = await server.call("unifi_get_console_info");
     expect(info.tier).toBe("clients-plus");
     expect(JSON.stringify(info.gated_off)).toContain("10.0");
+  });
+});
+
+describe("unifi_legacy_list_known_clients", () => {
+  const KNOWN = [
+    { mac: "aa:aa:aa:aa:aa:01", name: "Mower", oui: "Husqvarna", last_seen: 1_700_000_000 },
+    { mac: "aa:aa:aa:aa:aa:02", name: "Laptop", blocked: true, last_seen: 1_780_000_000 },
+    { mac: "aa:aa:aa:aa:aa:03", name: "Purifier", blocked: false, last_seen: 1_780_000_000 },
+  ];
+
+  const call = async (args: Record<string, unknown> = {}) => {
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).includes("/rest/user")
+        ? jsonResponse({ meta: { rc: "ok" }, data: KNOWN })
+        : jsonResponse(page(SITES)),
+    );
+    // Key auth deliberately: no login round trip for the mock to satisfy, and
+    // it exercises the path this console actually uses.
+    const server = await connect({
+      env: { ...READY_ENV, UNIFI_ENABLE_LEGACY: "1" },
+      fetchImpl: fetchMock,
+    });
+    return server.call("unifi_legacy_list_known_clients", args);
+  };
+
+  // The point of the tool: one call settles "is anything blocked" regardless of
+  // what was filtered. A blockedCount scoped to the filtered subset would make
+  // an empty result read as an all-clear, which is the wrong answer.
+  it("counts blocked clients across the whole site, not the filtered subset", async () => {
+    const res = await call({ search: "mower" });
+    expect(res.matched).toBe(1);
+    expect(res.blockedCount).toBe(1);
+    expect(res.everBlockedCount).toBe(2);
+    expect(res.totalKnown).toBe(3);
+  });
+
+  it("matches on vendor, not just name", async () => {
+    expect((await call({ search: "husqvarna" })).matched).toBe(1);
+  });
+
+  it("separates currently-blocked from ever-blocked", async () => {
+    expect((await call({ blocked: "only" })).matched).toBe(1);
+    expect((await call({ blocked: "everBlocked" })).matched).toBe(2);
   });
 });

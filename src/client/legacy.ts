@@ -18,6 +18,14 @@ export type LegacyClientOptions = {
   loginUrl: string;
   username: string;
   password: string;
+  /**
+   * When set, the legacy paths are called with `X-API-KEY` and no login happens
+   * at all. UniFi OS proxies the legacy API through the same gateway as the
+   * Integration API, and that gateway honours the key on both — so the cookie
+   * session, and the full-admin password behind it, is only needed for a
+   * self-hosted controller or an older build that rejects the key.
+   */
+  apiKey?: string | undefined;
   userAgent: string;
   maxRetries?: number;
   maxBytes?: number;
@@ -59,6 +67,7 @@ export class UnifiLegacyClient {
   private readonly loginUrl: string;
   private readonly username: string;
   private readonly password: string;
+  private readonly apiKey: string | undefined;
   private readonly userAgent: string;
   private readonly maxRetries: number;
   private readonly maxBytes: number;
@@ -73,6 +82,7 @@ export class UnifiLegacyClient {
     this.loginUrl = opts.loginUrl;
     this.username = opts.username;
     this.password = opts.password;
+    this.apiKey = opts.apiKey;
     this.userAgent = opts.userAgent;
     this.maxRetries = opts.maxRetries ?? 3;
     this.maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
@@ -167,6 +177,17 @@ export class UnifiLegacyClient {
     return session;
   }
 
+  /** Cookie + CSRF headers for one request, establishing the session if needed. */
+  private async sessionHeaders(method: string): Promise<Record<string, string>> {
+    const session = await this.getSession();
+    return {
+      Cookie: session.cookie,
+      // Missing this on a write yields a bare 403 with no useful body, which is
+      // one of the least debuggable failures this API produces.
+      ...(session.csrfToken && method !== "GET" ? { "X-CSRF-Token": session.csrfToken } : {}),
+    };
+  }
+
   /** A CSRF token may be rotated on any response, so absorb it wherever it appears. */
   private noteCsrf(res: Response): void {
     const updated = res.headers.get("x-updated-csrf-token") ?? res.headers.get("x-csrf-token");
@@ -184,17 +205,16 @@ export class UnifiLegacyClient {
 
     const res = await withRetry(
       async () => {
-        const session = await this.getSession();
+        // Key auth is stateless: no login round trip, and no CSRF token to
+        // carry, because there is no session for a forged request to ride.
+        const auth = this.apiKey ? { "X-API-KEY": this.apiKey } : await this.sessionHeaders(method);
         return this.fetchImpl(url, {
           method,
           headers: {
             Accept: "application/json",
-            Cookie: session.cookie,
             "User-Agent": this.userAgent,
+            ...auth,
             ...(hasBody ? { "Content-Type": "application/json" } : {}),
-            // Missing this on a write yields a bare 403 with no useful body,
-            // which is one of the least debuggable failures this API produces.
-            ...(session.csrfToken && method !== "GET" ? { "X-CSRF-Token": session.csrfToken } : {}),
           },
           ...(hasBody ? { body: bodyText } : {}),
         });
@@ -258,7 +278,12 @@ export class UnifiLegacyClient {
       );
     }
     if (res.status === 401) {
-      return `${base} — the console session was rejected. Check UNIFI_USERNAME and UNIFI_PASSWORD.`;
+      return this.apiKey
+        ? `${base} — the console rejected UNIFI_API_KEY on the legacy path. A Site Manager key ` +
+            `from unifi.ui.com is NOT accepted here; this needs a key created on the console ` +
+            `itself. Older builds may not accept a key on the legacy API at all — set ` +
+            `UNIFI_USERNAME and UNIFI_PASSWORD to fall back to a console session.`
+        : `${base} — the console session was rejected. Check UNIFI_USERNAME and UNIFI_PASSWORD.`;
     }
     return base;
   }

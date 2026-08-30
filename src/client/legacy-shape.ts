@@ -106,3 +106,56 @@ export const summarizeLegacyEvent = (event: unknown): unknown => {
     "archived",
   ]);
 };
+
+/**
+ * A known client from `rest/user` — the controller's roster of every device it
+ * has ever seen, which is a different set from the connected clients the
+ * Integration API returns and the only place a *former* block is recorded.
+ *
+ * Two traps, both of which have produced a wrong answer here already:
+ *
+ *  1. **`blocked` is omitted when false.** Only a client that has been blocked
+ *     at some point carries the key at all, so `blocked === false` and "key
+ *     absent" mean different things — the first is a device someone unblocked,
+ *     the second a device never touched. `wasEverBlocked` preserves that, since
+ *     it is the interesting signal when the question is "did I do this?".
+ *  2. **Timestamps are seconds, not milliseconds.** `new Date(last_seen)` gives
+ *     January 1970 and looks plausible enough to ship.
+ */
+const seconds = (value: unknown): number | undefined =>
+  typeof value === "number" && value > 0 ? value : undefined;
+
+/** Legacy timestamps are UNIX seconds; `new Date(n)` on one yields 1970. */
+const iso = (value: unknown): string | undefined => {
+  const s = seconds(value);
+  return s === undefined ? undefined : new Date(s * 1000).toISOString();
+};
+
+export const summarizeKnownClient = (client: unknown, now = Date.now()): Rec => {
+  if (!isRecord(client)) return { raw: client };
+  const lastSeen = seconds(client.last_seen);
+
+  const out: Rec = {
+    mac: client.mac,
+    blocked: client.blocked === true,
+    // Distinguishes "unblocked at some point" from "never blocked" — see above.
+    wasEverBlocked: "blocked" in client,
+  };
+  const name = client.name ?? client.hostname;
+  if (name) out.name = name;
+  if (client.oui) out.oui = client.oui;
+  if (client.device_name) out.fingerprint = client.device_name;
+  out.isWired = client.is_wired === true;
+  if (client.is_guest === true) out.isGuest = true;
+  if (iso(client.first_seen)) out.firstSeen = iso(client.first_seen);
+  if (iso(client.last_seen)) out.lastSeen = iso(client.last_seen);
+  if (lastSeen !== undefined) {
+    out.daysSinceSeen = Math.floor((now / 1000 - lastSeen) / 86400);
+  }
+  if (client.last_ip) out.lastIp = client.last_ip;
+  if (client.last_uplink_name) out.lastUplink = client.last_uplink_name;
+  if (client.last_connection_network_name) out.network = client.last_connection_network_name;
+  if (client.use_fixedip === true && client.fixed_ip) out.fixedIp = client.fixed_ip;
+  if (client.note) out.note = client.note;
+  return out;
+};

@@ -11,6 +11,7 @@ import { UnifiClient } from "./client/unifi.js";
 import {
   integrationBaseUrl,
   integrationReady,
+  legacyAuthMode,
   legacyBaseUrl,
   legacyLoginUrl,
   legacyReady,
@@ -93,6 +94,7 @@ export const createServer = (opts: CreateServerOptions): CreatedServer => {
           loginUrl,
           username: config.username ?? "",
           password: config.password ?? "",
+          ...(legacyAuthMode(config) === "apiKey" ? { apiKey: config.apiKey } : {}),
           userAgent: USER_AGENT,
           maxRetries: config.maxRetries,
           fetch: fetchImpl,

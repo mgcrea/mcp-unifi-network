@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { WritesDisabledError } from "../client/errors.js";
-import { summarizeLegacyEvent } from "../client/legacy-shape.js";
+import { summarizeKnownClient, summarizeLegacyEvent } from "../client/legacy-shape.js";
 import type { UnifiLegacyClient } from "../client/legacy.js";
 import { normalizeMac } from "../mac.js";
 import type { ToolContext } from "./index.js";
@@ -30,9 +30,10 @@ const legacyLimitArg = z
 
 /**
  * The legacy controller API, wrapped only where the official one has no answer:
- * blocking and reconnecting clients, and reading events, alarms and health.
- * These go through a cookie session against an undocumented API, which is why
- * they carry their own `unifi_legacy_` namespace rather than blending in.
+ * the roster of clients the console has ever seen (and which of them are
+ * blocked), blocking and reconnecting clients, and events, alarms and health.
+ * These go against an undocumented API, which is why they carry their own
+ * `unifi_legacy_` namespace rather than blending in.
  */
 export const registerLegacyTools = (
   server: McpServer,
@@ -107,6 +108,121 @@ export const registerLegacyTools = (
         });
         const rows = Array.isArray(data) ? data : [];
         return { data: rows.map(summarizeLegacyEvent), count: rows.length };
+      }),
+  );
+
+  server.registerTool(
+    "unifi_legacy_list_known_clients",
+    {
+      description:
+        "List every client the controller has EVER seen on a site, connected or not, with " +
+        "whether each is blocked. This is the only way to answer questions about devices that " +
+        "are not currently connected: `unifi_list_clients` returns the live roster only, so a " +
+        "blocked or long-absent device is invisible to it. Use this to find out why a device " +
+        'will not connect, to audit what has been blocked, or to find "that thing I saw last ' +
+        'summer". The reply always carries `blockedCount` for the whole site regardless of ' +
+        "which filters you pass, so one call settles whether anything is blocked at all.",
+      inputSchema: {
+        site: siteArg,
+        blocked: z
+          .enum(["any", "only", "everBlocked"])
+          .default("any")
+          .describe(
+            'Which clients to return. "only" is those blocked right now. "everBlocked" also ' +
+              "includes clients that were blocked and later unblocked — the controller keeps " +
+              'that mark, and it is what answers "did I block this by accident once?". ' +
+              'Defaults to "any".',
+          ),
+        search: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Case-insensitive substring matched against the name, hostname, MAC, vendor (OUI) " +
+              "and fingerprint. Vendor is usually the way in for an appliance that never had a " +
+              'name — try the manufacturer rather than what you call the thing ("husqvarna", ' +
+              'not "lawnmower").',
+          ),
+        notSeenForDays: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            "Only clients last seen at least this many days ago. Finds what has dropped off.",
+          ),
+        seenWithinDays: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Only clients seen within this many days."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .default(100)
+          .describe(
+            "Maximum rows to return (1-500). Defaults to 100. A busy site accumulates hundreds " +
+              "of known clients, most of them junk from MAC randomisation — filter rather than " +
+              "raising this.",
+          ),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ site, blocked, search, notSeenForDays, seenWithinDays, limit }) =>
+      wrap(async () => {
+        // `rest/user` is deliberate over the newer v2 `clients/history`: it is
+        // the complete roster (203 vs 162 on the console this was built
+        // against), and v2 omits entries the controller has stopped tracking
+        // actively — exactly the old ones these questions are about.
+        const data = await legacy.request<unknown[]>("GET", await sitePath(site, "/rest/user"));
+        const rows = (Array.isArray(data) ? data : []).map((row) => summarizeKnownClient(row));
+
+        // Counted across every known client, never across the filtered subset —
+        // a `blockedCount` that moved with the filters would make an empty
+        // filtered result read as "nothing is blocked".
+        const blockedCount = rows.filter((row) => row.blocked === true).length;
+        const everBlockedCount = rows.filter((row) => row.wasEverBlocked === true).length;
+
+        const needle = search?.toLowerCase();
+        const matched = rows.filter((row) => {
+          if (blocked === "only" && row.blocked !== true) return false;
+          if (blocked === "everBlocked" && row.wasEverBlocked !== true) return false;
+          const age = typeof row.daysSinceSeen === "number" ? row.daysSinceSeen : undefined;
+          if (notSeenForDays !== undefined && (age === undefined || age < notSeenForDays)) {
+            return false;
+          }
+          if (seenWithinDays !== undefined && (age === undefined || age > seenWithinDays)) {
+            return false;
+          }
+          if (!needle) return true;
+          return ["name", "mac", "oui", "fingerprint"]
+            .map((key) => String(row[key] ?? "").toLowerCase())
+            .some((value) => value.includes(needle));
+        });
+
+        matched.sort(
+          (a, b) =>
+            (typeof a.daysSinceSeen === "number" ? a.daysSinceSeen : Number.MAX_SAFE_INTEGER) -
+            (typeof b.daysSinceSeen === "number" ? b.daysSinceSeen : Number.MAX_SAFE_INTEGER),
+        );
+
+        const page = matched.slice(0, limit);
+        return {
+          data: page,
+          totalKnown: rows.length,
+          matched: matched.length,
+          blockedCount,
+          everBlockedCount,
+          ...(page.length < matched.length
+            ? {
+                truncated: true,
+                note: `Returned ${page.length} of ${matched.length} matches. Narrow with \`search\` or \`notSeenForDays\`.`,
+              }
+            : {}),
+        };
       }),
   );
 

@@ -298,3 +298,51 @@ describe("UnifiLegacyClient", () => {
     ).rejects.toThrow(/two-factor/);
   });
 });
+
+const keyedLegacy = (fetchMock: ReturnType<typeof vi.fn>) =>
+  new UnifiLegacyClient({
+    baseUrl: "https://10.0.0.1/proxy/network",
+    loginUrl: "https://10.0.0.1/api/auth/login",
+    username: "",
+    password: "",
+    apiKey: "test-key",
+    userAgent: "test",
+    maxRetries: 1,
+    fetch: fetchMock as unknown as typeof fetch,
+  });
+
+describe("UnifiLegacyClient with API-key auth", () => {
+  // A UniFi OS console accepts the Integration key on the legacy paths too,
+  // which takes the full-admin console password out of the common path. The
+  // assertion that matters is the absence of the login round trip: if this
+  // regresses to a session the server needs credentials it does not have.
+  it("sends X-API-KEY and never logs in", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ meta: { rc: "ok" }, data: [{ mac: "a" }] }));
+
+    expect(await keyedLegacy(fetchMock).request("GET", "/api/s/default/rest/user")).toEqual([
+      { mac: "a" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/s/default/rest/user");
+
+    const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> } | undefined;
+    const headers = init?.headers ?? {};
+    expect(headers["X-API-KEY"]).toBe("test-key");
+    expect(headers.Cookie).toBeUndefined();
+  });
+
+  // A key rejected on the legacy path is the Site-Manager-key mistake, and the
+  // message has to name it — the two key types are indistinguishable by sight.
+  it("explains a 401 in terms of the key, not a password", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ meta: { rc: "error" } }, { status: 401 }));
+    const err = await keyedLegacy(fetchMock)
+      .request("GET", "/api/s/default/rest/user")
+      .catch((e: unknown) => e);
+    expect(String(err)).toMatch(/Site Manager key/);
+    expect(String(err)).not.toMatch(/UNIFI_PASSWORD\b.*Check/);
+  });
+});

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { summarizeLegacyDevice, summarizeLegacyEvent } from "../src/client/legacy-shape.js";
+import {
+  summarizeKnownClient,
+  summarizeLegacyDevice,
+  summarizeLegacyEvent,
+} from "../src/client/legacy-shape.js";
 import { summarizeDevice, unwrapPage, wrapCollected } from "../src/client/shape.js";
 import { createHttpFetch } from "../src/client/tls.js";
 import { and, eq, inSet, like, not, or, quote } from "../src/filter.js";
@@ -181,3 +185,44 @@ describe("TLS", () => {
 
 const bigObject = (): Record<string, number> =>
   Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`field_${i}`, i]));
+
+describe("summarizeKnownClient", () => {
+  const NOW = Date.UTC(2026, 7, 30) as number;
+
+  // The controller omits `blocked` entirely until a client has been blocked at
+  // least once, so absent and false are different facts. Collapsing them loses
+  // the only record that a block ever happened, which is exactly what an
+  // "did I block this by accident?" question is asking about.
+  it("separates never-blocked from unblocked", () => {
+    expect(summarizeKnownClient({ mac: "a" }, NOW)).toMatchObject({
+      blocked: false,
+      wasEverBlocked: false,
+    });
+    expect(summarizeKnownClient({ mac: "b", blocked: false }, NOW)).toMatchObject({
+      blocked: false,
+      wasEverBlocked: true,
+    });
+    expect(summarizeKnownClient({ mac: "c", blocked: true }, NOW)).toMatchObject({
+      blocked: true,
+      wasEverBlocked: true,
+    });
+  });
+
+  // Legacy timestamps are UNIX seconds. Passing one to `new Date` gives 1970,
+  // which is wrong in a way that still renders as a plausible date.
+  it("reads timestamps as seconds, not milliseconds", () => {
+    const out = summarizeKnownClient(
+      { mac: "a", first_seen: 1_669_582_112, last_seen: Math.floor(NOW / 1000) - 86_400 * 30 },
+      NOW,
+    );
+    expect(out.firstSeen).toBe("2022-11-27T20:48:32.000Z");
+    expect(out.daysSinceSeen).toBe(30);
+  });
+
+  it("omits a fixed IP that is configured but not in use", () => {
+    expect(summarizeKnownClient({ mac: "a", fixed_ip: "10.0.0.9" }, NOW).fixedIp).toBeUndefined();
+    expect(
+      summarizeKnownClient({ mac: "a", fixed_ip: "10.0.0.9", use_fixedip: true }, NOW).fixedIp,
+    ).toBe("10.0.0.9");
+  });
+});

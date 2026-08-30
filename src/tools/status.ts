@@ -1,6 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { integrationReady, isConfigured, legacyReady, setupInstructions } from "../config.js";
+import {
+  integrationReady,
+  isConfigured,
+  legacyAuthMode,
+  legacyReady,
+  setupInstructions,
+} from "../config.js";
 import type { ToolContext } from "./index.js";
 import { wrap } from "./util.js";
 
@@ -39,11 +45,17 @@ export const registerStatusTool = (server: McpServer, ctx: ToolContext): void =>
           },
           legacy: {
             enabled: legacyReady(config),
+            auth: legacyAuthMode(config) ?? null,
             note: legacyReady(config)
-              ? "The unifi_legacy_* tools use a cookie session against the undocumented " +
-                "controller API. They cover what the official API does not."
-              : "Off. Set UNIFI_ENABLE_LEGACY=1 with UNIFI_USERNAME/UNIFI_PASSWORD to add " +
-                "client blocking, events, alarms and health.",
+              ? `The unifi_legacy_* tools reach the undocumented controller API using ${
+                  legacyAuthMode(config) === "apiKey"
+                    ? "UNIFI_API_KEY, which a UniFi OS console accepts on the legacy paths too"
+                    : "a console admin cookie session"
+                }. They cover what the official API does not — above all the roster of clients ` +
+                "the console has ever seen, which is where blocked and long-absent devices live."
+              : "Off. Set UNIFI_ENABLE_LEGACY=1 to add the known-client roster (the only place " +
+                "blocked and long-absent devices appear), events, alarms and health. On UniFi OS " +
+                "the existing UNIFI_API_KEY is enough; elsewhere set UNIFI_USERNAME/UNIFI_PASSWORD.",
           },
           console: {
             application_version: probe.appVersion ?? null,

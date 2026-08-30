@@ -65,7 +65,7 @@ locks you out of the console you are managing it through, with no undo.
 | `UNIFI_ALLOW_WRITES`                                         | `false`                       | Register the mutating tools.                              |
 | `UNIFI_INSECURE_TLS`                                         | `false`                       | Disable certificate verification, this server only.       |
 | `UNIFI_ENABLE_LEGACY`                                        | `false`                       | Register the `unifi_legacy_*` tools.                      |
-| `UNIFI_USERNAME` / `UNIFI_PASSWORD`                          | —                             | Legacy tier only. A **local** admin, not SSO.             |
+| `UNIFI_USERNAME` / `UNIFI_PASSWORD`                          | —                             | Legacy tier fallback only. A **local** admin, not SSO.    |
 | `UNIFI_APP_VERSION`                                          | probed                        | Pin the version instead of probing at startup.            |
 | `UNIFI_PAGE_LIMIT` / `UNIFI_MAX_PAGES` / `UNIFI_MAX_RETRIES` | 50 / 20 / 3                   | Tuning.                                                   |
 | `UNIFI_CONFIG`                                               | `~/.config/unifi/config.json` | JSON alternative to all of the above.                     |
@@ -131,17 +131,20 @@ npx @modelcontextprotocol/inspector node dist/cli.js
 | `unifi_create_vouchers`        | Generate guest vouchers                                  | W             | 9.3   |
 | `unifi_delete_vouchers`        | Delete one voucher, or every match of a filter           | W ⚠️          | 9.3   |
 
-With `UNIFI_ENABLE_LEGACY=1`:
+With `UNIFI_ENABLE_LEGACY=1`. On a UniFi OS console this needs no extra
+credential — the console accepts `UNIFI_API_KEY` on the legacy paths too, so the
+flag alone is enough:
 
-| Tool                            | What it does                                           |              |
-| ------------------------------- | ------------------------------------------------------ | ------------ |
-| `unifi_legacy_get_health`       | Per-subsystem health — the "is anything wrong" call    |              |
-| `unifi_legacy_list_events`      | Controller event log                                   |              |
-| `unifi_legacy_list_alarms`      | Open alarms                                            |              |
-| `unifi_legacy_request`          | Escape hatch: port forwarding, adoption, upgrades, DPI | W ⚠️ non-GET |
-| `unifi_legacy_unblock_client`   | Let a blocked client back on                           | W            |
-| `unifi_legacy_block_client`     | Block a client by MAC                                  | W ⚠️         |
-| `unifi_legacy_reconnect_client` | Kick a client so it reassociates                       | W ⚠️         |
+| Tool                              | What it does                                           |              |
+| --------------------------------- | ------------------------------------------------------ | ------------ |
+| `unifi_legacy_list_known_clients` | Every client ever seen, and which are blocked          |              |
+| `unifi_legacy_get_health`         | Per-subsystem health — the "is anything wrong" call    |              |
+| `unifi_legacy_list_events`        | Controller event log                                   |              |
+| `unifi_legacy_list_alarms`        | Open alarms                                            |              |
+| `unifi_legacy_request`            | Escape hatch: port forwarding, adoption, upgrades, DPI | W ⚠️ non-GET |
+| `unifi_legacy_unblock_client`     | Let a blocked client back on                           | W            |
+| `unifi_legacy_block_client`       | Block a client by MAC                                  | W ⚠️         |
+| `unifi_legacy_reconnect_client`   | Kick a client so it reassociates                       | W ⚠️         |
 
 ## A worked example: find and reboot a stuck access point
 
@@ -162,9 +165,31 @@ so nothing is fetched and discarded here.
 
 All of these are baked into the tool descriptions, but they explain the shape of this server.
 
-1. **There are two kinds of API key.** A cloud key from `unifi.ui.com` is not a local console
+1. **`unifi_list_clients` returns only what is connected _right now_.** It is not a device
+   inventory. A blocked client, or one that has not been on the network for a week, is simply
+   absent — so "is anything blocked?" and "why will this thing not connect?" cannot be answered
+   from it, and an empty result reads like an all-clear when it is nothing of the kind. The
+   Integration API has no historical view at all: there is no known-clients, blocked-clients or
+   event endpoint anywhere in it. `unifi_legacy_list_known_clients` is the answer, and it is the
+   main reason to turn the legacy tier on.
+
+   Worse, the obvious workaround does not work. A server-side filter for the blocked state
+   returns an empty set rather than an error **for a value that does not exist**:
+
+   ```
+   filter=access.type.eq('BLOCKED')          → 0 results
+   filter=access.type.eq('NOT_A_REAL_VALUE') → 0 results
+   ```
+
+   So a zero from that query is not evidence of absence, and it is very easy to report a false
+   all-clear from it. Whenever a filtered count is load-bearing, check it against a value you
+   know is fake before you trust the zero.
+
+2. **There are two kinds of API key.** A cloud key from `unifi.ui.com` is not a local console
    key, and using one against a local console gives a 401 that looks like a typo. See Configure.
-2. **Cloud mode cannot reach a console the Site Manager API does not list.** `UNIFI_CONSOLE_ID`
+   A local key is accepted on the **legacy** paths too, which is why the legacy tier needs no
+   console password on UniFi OS.
+3. **Cloud mode cannot reach a console the Site Manager API does not list.** `UNIFI_CONSOLE_ID`
    has to come from `GET https://api.ui.com/v1/hosts`, and that listing is not the same as what
    unifi.ui.com shows you. A console grouped into a **Fabric** — several consoles (Network,
    Protect, NAS) presented under one name — appears in the web UI but **not** in `/v1/hosts`,
@@ -172,29 +197,29 @@ All of these are baked into the tool descriptions, but they explain the shape of
    showed and the API did not, on both `/v1/hosts` and `/ea/hosts`, with no pagination involved.
    For such a console there is no host id, so cloud mode is unavailable and you need a local
    Integration key with `UNIFI_MODE=unifios`.
-3. **`siteId` is a UUID, not `default`.** A site has three identifiers: the UUID this API's paths
+4. **`siteId` is a UUID, not `default`.** A site has three identifiers: the UUID this API's paths
    take, the legacy 8-character `internalReference` that appears in every controller URL and forum
    post, and a display name. Every tool accepts all three. The legacy tools need the
    `internalReference`, and that translation happens for you too.
-4. **The endpoint set depends on the console's version.** 7 paths in 9.0, 12 in 9.3, 32 in 10.0,
+5. **The endpoint set depends on the console's version.** 7 paths in 9.0, 12 in 9.3, 32 in 10.0,
    44 in 10.3. The server probes `GET /v1/info` at startup and registers accordingly, so the tool
    list can differ between two runs against different consoles. `unifi_get_console_info` says why.
    If the console cannot be reached at startup the server still comes up, assumes the newest
    version, and lets any gap surface as an error naming the version it needs — a visible failure
    beats a silently missing tool.
-5. **Local consoles use self-signed certificates, and pinning one is not enough.** The
+6. **Local consoles use self-signed certificates, and pinning one is not enough.** The
    certificate is issued to `unifi.local` with no IP SAN, so a console addressed by IP fails
    verification however the certificate is trusted — you need a host name too. See Security.
-6. **The classic self-hosted controller has no Integration API.** API keys are UniFi OS only, so
+7. **The classic self-hosted controller has no Integration API.** API keys are UniFi OS only, so
    port 8443 means the legacy tier or nothing. The config refuses the contradictory combination
    rather than failing later at request time.
-7. **The legacy API reports errors with HTTP 200.** `{"meta":{"rc":"error"}}` is a failure however
+8. **The legacy API reports errors with HTTP 200.** `{"meta":{"rc":"error"}}` is a failure however
    healthy the status line looks. That is unwrapped for you in one place.
-8. **Legacy payloads are enormous** — a `stat/device` object declares ~423 fields and one UDM-Pro
+9. **Legacy payloads are enormous** — a `stat/device` object declares ~423 fields and one UDM-Pro
    is 50–150 KB. Legacy responses are projected down, and `unifi_legacy_request` refuses anything
    over 5 MB rather than parsing it. Pass `attrs` and `_limit`.
-9. **Login is rate-limited.** The legacy session is established once per server start and reused;
-   a 429 on login is never retried, because retrying deepens the lockout.
+10. **Login is rate-limited.** The legacy session is established once per server start and reused;
+    a 429 on login is never retried, because retrying deepens the lockout.
 
 ## Troubleshooting
 

@@ -9,6 +9,7 @@ import {
   integrationBaseUrl,
   integrationReady,
   isConfigured,
+  legacyAuthMode,
   legacyBaseUrl,
   legacyLoginUrl,
   legacyReady,
@@ -255,5 +256,46 @@ describe("UNIFI_MODE", () => {
       ABSENT,
     );
     expect(config.mode).toBe("cloud");
+  });
+});
+
+describe("legacy authentication mode", () => {
+  // The original design required a console admin password for the legacy tier.
+  // It does not: a UniFi OS console honours the Integration key on the legacy
+  // paths, verified against Network 10.6.101.
+  it("uses the API key on UniFi OS when no credentials are set", () => {
+    const config = loadConfig(
+      { UNIFI_HOST: "10.0.0.1", UNIFI_API_KEY: "k", UNIFI_ENABLE_LEGACY: "1" },
+      ABSENT,
+    );
+    expect(legacyAuthMode(config)).toBe("apiKey");
+    expect(legacyReady(config)).toBe(true);
+    expect(config.issues).toEqual([]);
+  });
+
+  it("prefers an explicit console session when both are available", () => {
+    const config = loadConfig(
+      {
+        UNIFI_HOST: "10.0.0.1",
+        UNIFI_API_KEY: "k",
+        UNIFI_ENABLE_LEGACY: "1",
+        UNIFI_USERNAME: "admin",
+        UNIFI_PASSWORD: "pw",
+      },
+      ABSENT,
+    );
+    expect(legacyAuthMode(config)).toBe("session");
+  });
+
+  // A self-hosted controller serves no Integration API, so it has no key to
+  // fall back on and still needs the password.
+  it("still requires credentials on a classic controller", () => {
+    const config = loadConfig(
+      { UNIFI_MODE: "classic", UNIFI_HOST: "10.0.0.1", UNIFI_ENABLE_LEGACY: "1" },
+      ABSENT,
+    );
+    expect(legacyAuthMode(config)).toBeUndefined();
+    expect(legacyReady(config)).toBe(false);
+    expect(config.issues.join(" ")).toMatch(/UNIFI_USERNAME/);
   });
 });
