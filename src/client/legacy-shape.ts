@@ -121,6 +121,13 @@ export const summarizeLegacyEvent = (event: unknown): unknown => {
  *     it is the interesting signal when the question is "did I do this?".
  *  2. **Timestamps are seconds, not milliseconds.** `new Date(last_seen)` gives
  *     January 1970 and looks plausible enough to ship.
+ *  3. **`last_seen` is the last ASSOCIATION, not the last activity.** It does
+ *     not tick while a client stays connected, so a device that has been online
+ *     continuously for a month reports `last_seen` a month old. Measured on a
+ *     live console: 23 of 46 currently-connected clients looked stale that way,
+ *     several by over 100 days. Reading it as "last active" turns a healthy
+ *     always-on device into an apparently dead one, which is why the caller
+ *     passes `connectedNow` and why the field is named `lastAssociatedAt`.
  */
 const seconds = (value: unknown): number | undefined =>
   typeof value === "number" && value > 0 ? value : undefined;
@@ -131,7 +138,11 @@ const iso = (value: unknown): string | undefined => {
   return s === undefined ? undefined : new Date(s * 1000).toISOString();
 };
 
-export const summarizeKnownClient = (client: unknown, now = Date.now()): Rec => {
+export const summarizeKnownClient = (
+  client: unknown,
+  now = Date.now(),
+  connectedNow = false,
+): Rec => {
   if (!isRecord(client)) return { raw: client };
   const lastSeen = seconds(client.last_seen);
 
@@ -147,11 +158,18 @@ export const summarizeKnownClient = (client: unknown, now = Date.now()): Rec => 
   if (client.device_name) out.fingerprint = client.device_name;
   out.isWired = client.is_wired === true;
   if (client.is_guest === true) out.isGuest = true;
+  out.connectedNow = connectedNow;
   if (iso(client.first_seen)) out.firstSeen = iso(client.first_seen);
-  if (iso(client.last_seen)) out.lastSeen = iso(client.last_seen);
-  if (lastSeen !== undefined) {
-    out.daysSinceSeen = Math.floor((now / 1000 - lastSeen) / 86400);
-  }
+  if (iso(client.last_seen)) out.lastAssociatedAt = iso(client.last_seen);
+  // A connected client is being seen right now whatever the roster says, so its
+  // absence is zero days. Deriving this from `last_seen` alone reports an
+  // always-on device as long gone.
+  out.daysSinceSeen = connectedNow
+    ? 0
+    : lastSeen === undefined
+      ? undefined
+      : Math.floor((now / 1000 - lastSeen) / 86400);
+  if (out.daysSinceSeen === undefined) delete out.daysSinceSeen;
   if (client.last_ip) out.lastIp = client.last_ip;
   if (client.last_uplink_name) out.lastUplink = client.last_uplink_name;
   if (client.last_connection_network_name) out.network = client.last_connection_network_name;

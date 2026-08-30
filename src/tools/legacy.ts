@@ -149,14 +149,17 @@ export const registerLegacyTools = (
           .min(0)
           .optional()
           .describe(
-            "Only clients last seen at least this many days ago. Finds what has dropped off.",
+            "Only clients whose last association was at least this many days ago. Clients " +
+              "connected right now are always excluded however old their association is — " +
+              "`last_seen` stops moving while a client stays online, so an always-on device " +
+              "looks long gone without meaning it.",
           ),
         seenWithinDays: z
           .number()
           .int()
           .min(0)
           .optional()
-          .describe("Only clients seen within this many days."),
+          .describe("Only clients seen within this many days. Connected clients always match."),
         limit: z
           .number()
           .int()
@@ -177,8 +180,30 @@ export const registerLegacyTools = (
         // the complete roster (203 vs 162 on the console this was built
         // against), and v2 omits entries the controller has stopped tracking
         // actively — exactly the old ones these questions are about.
-        const data = await legacy.request<unknown[]>("GET", await sitePath(site, "/rest/user"));
-        const rows = (Array.isArray(data) ? data : []).map((row) => summarizeKnownClient(row));
+        // `stat/sta` is fetched alongside because `rest/user.last_seen` is the
+        // last ASSOCIATION, not the last activity: it stops moving while a
+        // client stays connected. Without this cross-reference a device online
+        // continuously for four months reports as absent for four months —
+        // measured at 23 of 46 connected clients on a live console.
+        const [data, live] = await Promise.all([
+          legacy.request<unknown[]>("GET", await sitePath(site, "/rest/user")),
+          legacy
+            .request<unknown[]>("GET", await sitePath(site, "/stat/sta"))
+            .catch(() => [] as unknown[]),
+        ]);
+        const connected = new Set(
+          (Array.isArray(live) ? live : [])
+            .map((c) => (c as { mac?: unknown }).mac)
+            .filter((m): m is string => typeof m === "string"),
+        );
+        const now = Date.now();
+        const rows = (Array.isArray(data) ? data : []).map((row) =>
+          summarizeKnownClient(
+            row,
+            now,
+            connected.has(String((row as { mac?: unknown }).mac ?? "")),
+          ),
+        );
 
         // Counted across every known client, never across the filtered subset —
         // a `blockedCount` that moved with the filters would make an empty
@@ -213,6 +238,7 @@ export const registerLegacyTools = (
         return {
           data: page,
           totalKnown: rows.length,
+          connectedNow: rows.filter((row) => row.connectedNow === true).length,
           matched: matched.length,
           blockedCount,
           everBlockedCount,

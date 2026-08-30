@@ -219,6 +219,20 @@ describe("summarizeKnownClient", () => {
     expect(out.daysSinceSeen).toBe(30);
   });
 
+  // `last_seen` is the last ASSOCIATION and stops moving while a client stays
+  // connected, so an always-on device reports an ancient one. Measured on a
+  // live console: 23 of 46 connected clients looked stale, several by 100+
+  // days. Reading it as "last active" declares healthy devices dead.
+  it("reports a connected client as present however old its association is", () => {
+    const ancient = { mac: "a", last_seen: Math.floor(NOW / 1000) - 86_400 * 120 };
+    expect(summarizeKnownClient(ancient, NOW).daysSinceSeen).toBe(120);
+    const live = summarizeKnownClient(ancient, NOW, true);
+    expect(live.daysSinceSeen).toBe(0);
+    expect(live.connectedNow).toBe(true);
+    // The raw association time is still reported, under a name that says so.
+    expect(live.lastAssociatedAt).toBe(new Date((NOW / 1000 - 86_400 * 120) * 1000).toISOString());
+  });
+
   it("omits a fixed IP that is configured but not in use", () => {
     expect(summarizeKnownClient({ mac: "a", fixed_ip: "10.0.0.9" }, NOW).fixedIp).toBeUndefined();
     expect(
