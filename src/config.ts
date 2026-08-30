@@ -447,10 +447,12 @@ export const setupInstructions = (
   if (config.mode !== "cloud" && !config.host) {
     steps.push(
       "Set UNIFI_HOST to the console, e.g. UNIFI_HOST=192.168.1.1. Local consoles ship a " +
-        "SELF-SIGNED certificate, so pick one of: (a) export the console's certificate and " +
-        "point NODE_EXTRA_CA_CERTS at it — the correct fix; (b) switch to UNIFI_MODE=cloud " +
-        "with UNIFI_CONSOLE_ID; or (c) as a last resort UNIFI_INSECURE_TLS=1, which disables " +
-        "verification for this server's requests only.",
+        "SELF-SIGNED certificate issued to `unifi.local` with NO IP SAN, so a console addressed " +
+        "by IP can never pass verification however its certificate is trusted. Pick one of: " +
+        "(a) address it by a host name that resolves to it AND point NODE_EXTRA_CA_CERTS at its " +
+        "certificate — both are needed, either alone fails; (b) switch to UNIFI_MODE=cloud with " +
+        "UNIFI_CONSOLE_ID, where the certificate is real; or (c) UNIFI_INSECURE_TLS=1, which " +
+        "disables verification for this server's requests only.",
     );
   }
 

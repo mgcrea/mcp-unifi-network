@@ -22,13 +22,21 @@ import type { Logger } from "./auth.js";
  * verified against a live console, where it surfaced as an unexplained
  * "fetch failed". Passing undici's own fetch keeps both sides on one class.
  * Verification stays on by default, so the global fetch remains the common path.
+ *
+ * Note what pinning a certificate can and cannot fix. These consoles present
+ * `CN=unifi.local` with SANs for `unifi.local`, `localhost` and `127.0.0.1` —
+ * and **no IP SAN**. Reached by IP, verification fails on the host name however
+ * the certificate is trusted. Measured with `curl --cacert`: by host name
+ * `ssl_verify=0`, by IP `ssl_verify=1`. So verifying needs BOTH
+ * NODE_EXTRA_CA_CERTS and a host name that resolves to the console.
  */
 export const createHttpFetch = (opts: { insecureTls: boolean; logger?: Logger }): typeof fetch => {
   if (!opts.insecureTls) return fetch;
 
   opts.logger?.warn?.(
     "UNIFI_INSECURE_TLS is set: TLS certificate verification is DISABLED for this server's " +
-      "requests. Prefer exporting the console certificate and setting NODE_EXTRA_CA_CERTS.",
+      "requests. To verify instead, address the console by a host name that resolves to it — " +
+      "its certificate has no IP SAN — and point NODE_EXTRA_CA_CERTS at that certificate.",
   );
 
   const dispatcher = new Agent({ connect: { rejectUnauthorized: false } });

@@ -26,9 +26,12 @@ relax verification is an undici dispatcher. The alternative,
 `NODE_TLS_REJECT_UNAUTHORIZED=0`, is process-global and would silently disable verification for
 every other request the process makes. `undici` is the same engine Node's own `fetch` already runs.
 
-**TLS.** Verification is on by default and `UNIFI_INSECURE_TLS` is refused in cloud mode, where
-it would be a pure downgrade. When it is on, the startup banner says `tls=INSECURE` on every
-start. Prefer `NODE_EXTRA_CA_CERTS` — see `.env.example`.
+**TLS.** Verification is on by default, and `UNIFI_INSECURE_TLS` is refused in cloud mode where it
+would be a pure downgrade. When it is on, the banner says `tls=INSECURE` on every start.
+Verifying instead takes two things together, and either alone achieves nothing: the certificate is
+self-signed, so `NODE_EXTRA_CA_CERTS` must point at it; **and** it is issued to `unifi.local` with
+no IP SAN, so `UNIFI_HOST` must be a host name that resolves to the console rather than its IP.
+See `.env.example` for both commands.
 
 **Your credentials.** The API key and, if the legacy tier is enabled, the console password come
 from the environment or from `~/.config/unifi/config.json`, which is warned about if it is
@@ -155,7 +158,9 @@ All of these are baked into the tool descriptions, but they explain the shape of
    If the console cannot be reached at startup the server still comes up, assumes the newest
    version, and lets any gap surface as an error naming the version it needs — a visible failure
    beats a silently missing tool.
-3. **Local consoles use self-signed certificates.** See Security and `.env.example`.
+3. **Local consoles use self-signed certificates, and pinning one is not enough.** The
+   certificate is issued to `unifi.local` with no IP SAN, so a console addressed by IP fails
+   verification however the certificate is trusted — you need a host name too. See Security.
 4. **The classic self-hosted controller has no Integration API.** API keys are UniFi OS only, so
    port 8443 means the legacy tier or nothing. The config refuses the contradictory combination
    rather than failing later at request time.
