@@ -1,7 +1,6 @@
 {
   "name": "@mgcrea/mcp-unifi-network",
   "version": "0.1.0",
-  "private": true,
   "description": "Model Context Protocol server for the UniFi Network API",
   "keywords": [
     "mcp",

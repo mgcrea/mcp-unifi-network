@@ -182,12 +182,14 @@ real crash is visible there.
 almost always the version gate or the write flag, both of which unregister rather than refuse.
 
 **401 on every call.** The key is per-console and shown only once. Re-create it under
-the Network UI. **Where that lives has moved**, which is the usual reason it cannot be found: on
-Network 10.6+ "Integrations" is its own item in the **left sidebar** (plug icon), no longer under
-Settings → Control Plane, which is where 9.x through early 10.x put it (and 8.x used
-Settings → System → Advanced → API). Any admin can create one; it is shown once in a popup and
-never again; and creation sometimes errors on the first attempt, so retry before assuming it is
-broken.
+the Network UI, at
+`https://<console>/network/default/settings/control-plane/integrations`. **Use that URL rather than
+hunting the sidebar** — where it appears moves between releases. On Network 10.6, `Control Plane`
+lives under a heading named after your console ("UDM Pro") at the _bottom_ of the settings sidebar,
+below `System`, which reads as a separate device section rather than part of Settings; that is the
+usual reason people conclude the page is missing. `Identity` is nested beneath it. Any admin can
+create a key; it is shown once in a popup and never again; and creation sometimes errors on the
+first attempt, so retry before assuming it is broken.
 
 **`fetch failed` / certificate errors.** Self-signed certificate; see Security.
 

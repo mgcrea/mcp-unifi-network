@@ -432,12 +432,15 @@ export const setupInstructions = (
     );
   } else if (!config.apiKey) {
     steps.push(
-      "Create an API key in the UniFi Network UI. Where it lives moved: on Network 10.6+ " +
-        "`Integrations` is its own item in the LEFT SIDEBAR (a plug icon), not under Settings. " +
-        "On 9.x through early 10.x it is Settings → Control Plane → Integrations; on 8.x, " +
-        "Settings → System → Advanced. Any admin can create one, it is shown once in a popup " +
-        "and can never be viewed again, and creation sometimes errors on the first attempt — " +
-        "retry before concluding anything is wrong. Set it as UNIFI_API_KEY.",
+      "Create an API key in the UniFi Network UI. The reliable way to reach it is the direct " +
+        "URL: https://<console>/network/default/settings/control-plane/integrations — the " +
+        "sidebar location moves between releases and is easy to miss. On Network 10.6 " +
+        '`Control Plane` sits under a heading named after the console (e.g. "UDM Pro") at the ' +
+        "BOTTOM of the settings sidebar, below `System`, which reads as a separate device " +
+        "section rather than part of Settings. Any admin can create a key, not just the owner. " +
+        "It is shown once in a popup and can afterwards only be renamed or deleted, and " +
+        "creation sometimes errors on the first attempt — retry before concluding anything is " +
+        "wrong. Set it as UNIFI_API_KEY.",
     );
   }
 
