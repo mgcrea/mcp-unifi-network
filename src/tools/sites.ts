@@ -1,4 +1,5 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 
 import { annotateSite } from "#/client/shape";
 import type { ToolContext } from "#/tools/index";
@@ -16,7 +17,7 @@ export const registerSiteTools = (server: McpServer, ctx: ToolContext): void => 
         'name such as "default", which the unifi_legacy_* tools take) and the display `name`. ' +
         "Every other tool accepts any of the three for its `site` argument, so this is mostly " +
         "useful when a site cannot be resolved or when you need the legacy name.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () =>
@@ -35,7 +36,7 @@ export const registerSiteTools = (server: McpServer, ctx: ToolContext): void => 
         "most of its endpoints in Network 10.0, so on an older console a large part of the tool " +
         "set simply does not exist. Call this when a tool is missing or returns a 404 — it names " +
         "the version each capability needs and lists what is gated off here.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () =>

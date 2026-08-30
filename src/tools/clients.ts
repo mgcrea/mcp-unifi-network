@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { summarizeClient, wrapCollected } from "#/client/shape";
@@ -26,7 +26,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
         "tools take), its name, type, IP, MAC and when it connected. " +
         "Filtering happens on the console, so a filtered call is cheaper than reading pages and " +
         "discarding them here.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         type: typeArg,
         name: z
@@ -42,7 +42,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
           ),
         filter: filterArg,
         limit: limitArg,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, type, name, connectedSince, filter, limit }) =>
@@ -73,7 +73,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
           "Get the full detail of one connected client by its `id` from `unifi_list_clients`. " +
           "Returns everything the console knows about that session, including its uplink device " +
           "and guest-access state.",
-        inputSchema: { site: siteArg, clientId: clientIdArg },
+        inputSchema: z.object({ site: siteArg, clientId: clientIdArg }),
         annotations: { readOnlyHint: true },
       },
       async ({ site, clientId }) =>
@@ -97,7 +97,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
           "Grant a client access through the guest portal without it entering a voucher or " +
           "accepting the terms. Use this to let someone straight onto the guest network. " +
           "Reversed with `unifi_unauthorize_guest`.",
-        inputSchema: {
+        inputSchema: z.object({
           site: siteArg,
           clientId: clientIdArg,
           timeLimitMinutes: z
@@ -131,7 +131,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
             .max(100_000)
             .optional()
             .describe("Upload rate cap in Kbps. Omit for uncapped."),
-        },
+        }),
         // Grants access rather than removing it, and re-running it simply
         // re-grants — so not destructive, and idempotent.
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
@@ -153,7 +153,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
         description:
           "Revoke a client's guest authorization, cutting its access immediately. This " +
           "disconnects a real person mid-session — there is no grace period and no notification.",
-        inputSchema: { site: siteArg, clientId: clientIdArg, confirm: confirmArg },
+        inputSchema: z.object({ site: siteArg, clientId: clientIdArg, confirm: confirmArg }),
         // destructiveHint means "destroys something that existed", and a live
         // network session for a real person is exactly that.
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },

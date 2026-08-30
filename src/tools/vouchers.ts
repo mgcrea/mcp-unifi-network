@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { wrapCollected } from "#/client/shape";
@@ -18,7 +18,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
         "how many guests have used each, and when it activates and expires. " +
         "An expired voucher is not deleted automatically — filter with `expired: false` for the " +
         "ones still usable.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         name: z.string().optional().describe("Match the voucher name, with `*` as a wildcard."),
         expired: z
@@ -27,7 +27,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
           .describe("True for expired vouchers only, false for still-valid ones."),
         filter: filterArg,
         limit: limitArg,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, name, expired, filter, limit }) =>
@@ -59,7 +59,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
         "get online, bounded by the time, data and rate limits set here. " +
         "The response contains the codes — they are not retrievable in bulk afterwards without " +
         "listing and matching on `name`, so give every batch a distinctive name.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         name: z
           .string()
@@ -117,7 +117,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
           .max(100_000)
           .optional()
           .describe("Upload rate cap in Kbps. Omit for uncapped."),
-      },
+      }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ site, ...body }) =>
@@ -137,7 +137,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
         "cannot be recovered. " +
         "Exactly one of `voucherId` or `filter` is required — a bulk delete with neither would " +
         "remove every voucher on the site, so it is refused.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         voucherId: z
           .string()
@@ -150,7 +150,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
             "first and check the result — this deletes everything it matches.",
         ),
         confirm: confirmArg,
-      },
+      }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ site, voucherId, filter }) =>

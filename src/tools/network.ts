@@ -1,4 +1,5 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 
 import { wrapCollected } from "#/client/shape";
 import type { ToolContext } from "#/tools/index";
@@ -24,7 +25,7 @@ export const registerNetworkTools = (server: McpServer, ctx: ToolContext): void 
         "settings and purpose. Read-only: this server does not create or modify networks, " +
         "because a wrong subnet or VLAN id disconnects every client on it with no undo. Make " +
         "those changes in the UniFi UI.",
-      inputSchema: { site: siteArg, filter: filterArg, limit: limitArg },
+      inputSchema: z.object({ site: siteArg, filter: filterArg, limit: limitArg }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, filter, limit }) =>
@@ -47,7 +48,7 @@ export const registerNetworkTools = (server: McpServer, ctx: ToolContext): void 
         "List the WiFi broadcasts (SSIDs) on a site, with the network each is bridged to, its " +
         "security mode, band and whether it is enabled. Read-only for the same reason as " +
         "networks: a bad SSID change takes every wireless client offline at once.",
-      inputSchema: { site: siteArg, filter: filterArg, limit: limitArg },
+      inputSchema: z.object({ site: siteArg, filter: filterArg, limit: limitArg }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, filter, limit }) =>

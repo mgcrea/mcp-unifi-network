@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { wrapCollected } from "#/client/shape";
@@ -28,7 +28,7 @@ export const registerFirewallTools = (server: McpServer, ctx: ToolContext): void
         "the ids here are what make `unifi_list_firewall_policies` readable. " +
         "This server never creates or modifies firewall configuration; make those changes in " +
         "the UniFi UI, where a mistake can be undone before it locks you out.",
-      inputSchema: { site: siteArg, filter: filterArg, limit: limitArg },
+      inputSchema: z.object({ site: siteArg, filter: filterArg, limit: limitArg }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, filter, limit }) =>
@@ -53,7 +53,7 @@ export const registerFirewallTools = (server: McpServer, ctx: ToolContext): void
         "evaluated in order, so pass `sourceZoneId` and `destinationZoneId` to see the ordering " +
         "that actually applies between one pair of zones. " +
         "Read-only, deliberately: a wrong policy can lock you out of the console with no undo.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         sourceZoneId: z
           .string()
@@ -68,7 +68,7 @@ export const registerFirewallTools = (server: McpServer, ctx: ToolContext): void
           .describe("Zone `id` from `unifi_list_firewall_zones`. Pass with `sourceZoneId`."),
         filter: filterArg,
         limit: limitArg,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, sourceZoneId, destinationZoneId, filter, limit }) =>

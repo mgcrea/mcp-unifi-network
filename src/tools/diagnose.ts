@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
@@ -55,7 +55,7 @@ export const registerDiagnoseTool = (
         "that cannot get on the WiFi, before any other tool: the most common cause leaves no " +
         "trace in the ordinary client list, so starting with `unifi_list_clients` returns " +
         "nothing and reads misleadingly like an all-clear.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         device: z
           .string()
@@ -66,7 +66,7 @@ export const registerDiagnoseTool = (
               'only handle on an appliance that never had a friendly name — try "husqvarna" ' +
               'rather than "lawnmower".',
           ),
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, device }) =>

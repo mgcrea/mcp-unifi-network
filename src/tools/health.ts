@@ -1,4 +1,5 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
 import type { ToolContext } from "#/tools/index";
@@ -33,7 +34,7 @@ export const registerHealthTool = (
         "a ranked findings list rather than five raw payloads, so a clean network is a short " +
         "answer. Use it for open-ended health, audit or 'anything wrong?' questions; use " +
         "unifi_diagnose_client instead when a specific device is the complaint.",
-      inputSchema: { site: siteArg },
+      inputSchema: z.object({ site: siteArg }),
       annotations: { readOnlyHint: true },
     },
     async ({ site }) =>

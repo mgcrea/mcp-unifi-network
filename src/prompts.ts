@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 /**
@@ -26,11 +26,11 @@ export const registerPrompts = (server: McpServer): void => {
       description:
         "Work out why one device cannot get on the WiFi — blocked, absent, out of range, or " +
         "connected and failing higher up.",
-      argsSchema: {
+      argsSchema: z.object({
         device: z
           .string()
           .describe('MAC, name, or fragment — e.g. "husqvarna", "14:5d:34:1a:62:da", "mower".'),
-      },
+      }),
     },
     ({ device }) =>
       user(
@@ -56,9 +56,9 @@ export const registerPrompts = (server: McpServer): void => {
       description:
         "List devices seen on the network for the first time recently, with enough identity to " +
         "judge whether each is expected.",
-      argsSchema: {
+      argsSchema: z.object({
         days: z.string().optional().describe("How many days back. Defaults to 7."),
-      },
+      }),
     },
     ({ days }) => {
       const parsed = Number.parseInt(days ?? "", 10);

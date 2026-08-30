@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { WritesDisabledError } from "#/client/errors";
@@ -57,7 +57,7 @@ export const registerLegacyTools = (
         "adopted, disconnected and pending devices in each, plus current throughput and latency. " +
         'This is the closest thing to a one-call answer to "is anything wrong?", and the ' +
         "official API has no equivalent.",
-      inputSchema: { site: siteArg },
+      inputSchema: z.object({ site: siteArg }),
       annotations: { readOnlyHint: true },
     },
     async ({ site }) =>
@@ -73,7 +73,7 @@ export const registerLegacyTools = (
         "restarting or being adopted, configuration changes and WAN transitions. " +
         'Use this to answer "what happened" questions; the official API exposes no event log ' +
         "at all. Events are verbose, so keep `limit` low and narrow `within` first.",
-      inputSchema: { site: siteArg, within: withinArg, limit: legacyLimitArg },
+      inputSchema: z.object({ site: siteArg, within: withinArg, limit: legacyLimitArg }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, within, limit }) =>
@@ -94,14 +94,14 @@ export const registerLegacyTools = (
         "List the site's alarms — the events the controller considers actionable, such as a " +
         "device going down or a rogue access point appearing. Unarchived alarms are the ones " +
         "still demanding attention.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         archived: z
           .boolean()
           .default(false)
           .describe("True to include archived alarms. Defaults to false — the open ones only."),
         limit: legacyLimitArg,
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, archived, limit }) =>
@@ -127,7 +127,7 @@ export const registerLegacyTools = (
         'summer". `firstSeenWithinDays` answers "did anything NEW join recently?". The reply ' +
         "always carries `blockedCount` for the whole site regardless of which filters you pass, " +
         "so one call settles whether anything is blocked at all.",
-      inputSchema: {
+      inputSchema: z.object({
         site: siteArg,
         blocked: z
           .enum(["any", "only", "everBlocked"])
@@ -189,7 +189,7 @@ export const registerLegacyTools = (
               "of known clients, most of them junk from MAC randomisation — filter rather than " +
               "raising this.",
           ),
-      },
+      }),
       annotations: { readOnlyHint: true },
     },
     async ({ site, blocked, search, notSeenForDays, seenWithinDays, firstSeenWithinDays, limit }) =>
@@ -294,7 +294,7 @@ export const registerLegacyTools = (
         "Remove a client's block, letting it back onto the network. Safe to call on a client " +
         "that was never blocked. Identified by MAC address, not by the UUID the official API " +
         "uses — a blocked client is not in `unifi_list_clients`, so its MAC is the only handle.",
-      inputSchema: { site: siteArg, mac: macArg },
+      inputSchema: z.object({ site: siteArg, mac: macArg }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
     async ({ site, mac }) =>
@@ -314,7 +314,7 @@ export const registerLegacyTools = (
         "cannot reconnect on any SSID until unblocked, and it disappears from " +
         "`unifi_list_clients` — so record the MAC before blocking. Reversed with " +
         "`unifi_legacy_unblock_client`.",
-      inputSchema: { site: siteArg, mac: macArg, confirm: confirmArg },
+      inputSchema: z.object({ site: siteArg, mac: macArg, confirm: confirmArg }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ site, mac }) =>
@@ -333,7 +333,7 @@ export const registerLegacyTools = (
         "Force a client to reconnect by kicking it off its access point. It normally rejoins " +
         "within seconds on its own — this is the usual fix for a device stuck on a distant AP or " +
         "a stale band. It does interrupt whatever that device was doing.",
-      inputSchema: { site: siteArg, mac: macArg, confirm: confirmArg },
+      inputSchema: z.object({ site: siteArg, mac: macArg, confirm: confirmArg }),
       // Not idempotent: each call is another disconnection, not a re-assertion
       // of the same state.
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
@@ -378,7 +378,7 @@ export const registerLegacyRequestTool = (
           ? "Writes are ENABLED and every non-GET call requires `confirm: true`, because the " +
             "cmd/* endpoints here are the irreversible ones."
           : "Writes are DISABLED: only GET is permitted."),
-      inputSchema: {
+      inputSchema: z.object({
         method: z.enum(methods).default("GET").describe("HTTP method."),
         path: z
           .string()
@@ -403,7 +403,7 @@ export const registerLegacyRequestTool = (
             "Required for any method other than GET. Explicit acknowledgement that this changes " +
               "live network state through an undocumented endpoint with no dry run.",
           ),
-      },
+      }),
       annotations: { readOnlyHint: !allowWrites, destructiveHint: allowWrites },
     },
     async ({ method, path, query, body, confirm }) =>

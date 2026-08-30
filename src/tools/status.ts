@@ -1,4 +1,5 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 
 import {
   integrationReady,
@@ -26,7 +27,7 @@ export const registerStatusTool = (server: McpServer, ctx: ToolContext): void =>
         "to set. Call this FIRST whenever a tool you expected is not in the list: on this API " +
         "the available endpoints depend on the console's version, so an absent tool usually " +
         "means an older console or missing configuration rather than a bug.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () =>
