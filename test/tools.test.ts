@@ -538,3 +538,49 @@ describe("new-device detection and the troubleshooting resource", () => {
     }
   });
 });
+
+describe("prompts (the client's slash commands)", () => {
+  it("offers the three prompts even with no credentials", async () => {
+    const server = await connect({ env: {}, probe: ASSUMED_PROBE });
+    const names = (await server.client.listPrompts()).prompts.map((p) => p.name).toSorted();
+    expect(names).toEqual(["diagnose-client", "network-health", "new-devices"]);
+  });
+
+  it("diagnose-client steers away from the live client list", async () => {
+    const server = await connect({ env: {}, probe: ASSUMED_PROBE });
+    const res = await server.client.getPrompt({
+      name: "diagnose-client",
+      arguments: { device: "husqvarna" },
+    });
+    const first = res.messages[0];
+    const text = first ? String((first.content as { text: string }).text) : "";
+    expect(text).toContain("husqvarna");
+    // The whole point: starting at unifi_list_clients returns nothing and reads
+    // like an all-clear, which is how this went wrong the first time.
+    expect(text).toMatch(/not unifi_list_clients/);
+    expect(text).toMatch(/absent is a diagnosis/i);
+  });
+
+  // Prompt arguments are strings in the protocol, so a numeric one has to be
+  // parsed, and a missing or junk value must fall back rather than error — a
+  // slash command that fails on a blank argument is worse than one that assumes.
+  it("new-devices parses its day count and defaults sanely", async () => {
+    const server = await connect({ env: {}, probe: ASSUMED_PROBE });
+    const textFor = async (args: Record<string, string>) => {
+      const res = await server.client.getPrompt({ name: "new-devices", arguments: args });
+      const first = res.messages[0];
+      return first === undefined ? "" : String((first.content as { text: string }).text);
+    };
+
+    expect(await textFor({ days: "30" })).toContain("firstSeenWithinDays=30");
+    const junkArgs: Record<string, string>[] = [
+      {},
+      { days: "" },
+      { days: "banana" },
+      { days: "-3" },
+    ];
+    for (const junk of junkArgs) {
+      expect(await textFor(junk)).toContain("firstSeenWithinDays=7");
+    }
+  });
+});

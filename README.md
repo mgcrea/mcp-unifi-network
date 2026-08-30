@@ -148,6 +148,21 @@ flag alone is enough:
 | `unifi_legacy_block_client`       | Block a client by MAC                                          | W ⚠️         |
 | `unifi_legacy_reconnect_client`   | Kick a client so it reassociates                               | W ⚠️         |
 
+## Prompts
+
+Clients surface these as slash commands. They carry the _order_ to call things
+in and the wrong conclusions to avoid on the way — the part no single tool
+description can hold, because it spans several tools.
+
+| Prompt             | Argument           | For                                  |
+| ------------------ | ------------------ | ------------------------------------ |
+| `/diagnose-client` | `device`           | "Why won't my lawnmower connect?"    |
+| `/new-devices`     | `days` (default 7) | "Did anything new join the network?" |
+| `/network-health`  | —                  | "Is everything OK?"                  |
+
+All three are registered unconditionally, so they work before anything is
+configured.
+
 ## Resources
 
 `unifi://troubleshooting` — field notes on the API behaviours that return a

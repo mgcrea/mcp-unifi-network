@@ -17,6 +17,7 @@ import {
   legacyReady,
 } from "#/config";
 import type { Config } from "#/config";
+import { registerPrompts } from "#/prompts";
 import { registerResources } from "#/resources";
 import { registerTools } from "#/tools/index";
 
@@ -107,6 +108,7 @@ export const createServer = (opts: CreateServerOptions): CreatedServer => {
   // configured, so gating them behind readiness would hide them exactly when
   // they are needed.
   registerResources(server);
+  registerPrompts(server);
 
   registerTools(
     server,
