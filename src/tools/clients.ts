@@ -19,6 +19,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
   server.registerTool(
     "unifi_list_clients",
     {
+      title: "UniFi: List Clients",
       description:
         "List the clients currently connected to a site — the devices on your network right now, " +
         "not the historical list. Each entry carries the client `id` (a UUID the other client " +
@@ -67,6 +68,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
     server.registerTool(
       "unifi_get_client",
       {
+        title: "UniFi: Get Client",
         description:
           "Get the full detail of one connected client by its `id` from `unifi_list_clients`. " +
           "Returns everything the console knows about that session, including its uplink device " +
@@ -90,6 +92,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
     server.registerTool(
       "unifi_authorize_guest",
       {
+        title: "UniFi: Authorize Guest",
         description:
           "Grant a client access through the guest portal without it entering a voucher or " +
           "accepting the terms. Use this to let someone straight onto the guest network. " +
@@ -146,6 +149,7 @@ export const registerClientTools = (server: McpServer, ctx: ToolContext): void =
     server.registerTool(
       "unifi_unauthorize_guest",
       {
+        title: "UniFi: Unauthorize Guest",
         description:
           "Revoke a client's guest authorization, cutting its access immediately. This " +
           "disconnects a real person mid-session — there is no grace period and no notification.",

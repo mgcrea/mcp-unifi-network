@@ -12,6 +12,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
   server.registerTool(
     "unifi_list_vouchers",
     {
+      title: "UniFi: List Vouchers",
       description:
         "List the hotspot guest vouchers on a site, with their code, name, time and data limits, " +
         "how many guests have used each, and when it activates and expires. " +
@@ -52,6 +53,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
   server.registerTool(
     "unifi_create_vouchers",
     {
+      title: "UniFi: Create Vouchers",
       description:
         "Generate hotspot guest vouchers. Each is a code a guest enters on the captive portal to " +
         "get online, bounded by the time, data and rate limits set here. " +
@@ -128,6 +130,7 @@ export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void 
   server.registerTool(
     "unifi_delete_vouchers",
     {
+      title: "UniFi: Delete Vouchers",
       description:
         "Delete one voucher by id, or every voucher matching a filter. Deleted vouchers stop " +
         "working immediately, including ones a guest is currently connected on, and the codes " +

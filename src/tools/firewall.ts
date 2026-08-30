@@ -21,6 +21,7 @@ export const registerFirewallTools = (server: McpServer, ctx: ToolContext): void
   server.registerTool(
     "unifi_list_firewall_zones",
     {
+      title: "UniFi: List Firewall Zones",
       description:
         "List the firewall zones on a site — the named groups of networks that zone-based " +
         "policies are written between. Read these first: a policy references zones by id, so " +
@@ -45,6 +46,7 @@ export const registerFirewallTools = (server: McpServer, ctx: ToolContext): void
   server.registerTool(
     "unifi_list_firewall_policies",
     {
+      title: "UniFi: List Firewall Policies",
       description:
         "List the zone-based firewall policies on a site, with their action, source and " +
         "destination zones, matching criteria and whether each is enabled. Policies are " +

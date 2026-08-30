@@ -26,6 +26,7 @@ export const registerDeviceTools = (server: McpServer, ctx: ToolContext): void =
   server.registerTool(
     "unifi_list_devices",
     {
+      title: "UniFi: List Devices",
       description:
         "List the UniFi devices adopted by a site — access points, switches, gateways — with " +
         "their state, model, IP, MAC and firmware. Use `firmwareUpdatable: true` to find what " +
@@ -72,6 +73,7 @@ export const registerDeviceTools = (server: McpServer, ctx: ToolContext): void =
   server.registerTool(
     "unifi_get_device",
     {
+      title: "UniFi: Get Device",
       description:
         "Get one adopted device in full, including its `features`, `interfaces`, uplink and " +
         "adoption timestamps — everything `unifi_list_devices` trims away.",
@@ -89,6 +91,7 @@ export const registerDeviceTools = (server: McpServer, ctx: ToolContext): void =
   server.registerTool(
     "unifi_get_device_stats",
     {
+      title: "UniFi: Get Device Stats",
       description:
         "Get a device's latest telemetry: uptime, CPU and memory utilization, load averages, " +
         "uplink throughput and per-radio transmit retry rates. This is the current snapshot the " +
@@ -110,6 +113,7 @@ export const registerDeviceTools = (server: McpServer, ctx: ToolContext): void =
   server.registerTool(
     "unifi_restart_device",
     {
+      title: "UniFi: Restart Device",
       description:
         "Restart an adopted device. It drops off the network for a minute or two and takes every " +
         "client on it down with it — restarting a gateway or the switch you are connected " +
@@ -134,6 +138,7 @@ export const registerDeviceTools = (server: McpServer, ctx: ToolContext): void =
     server.registerTool(
       "unifi_power_cycle_port",
       {
+        title: "UniFi: Power Cycle Port",
         description:
           "Power-cycle one PoE port on a switch, rebooting whatever is plugged into it. Use this " +
           "to reboot a camera, phone or access point that has no restart tool of its own. " +

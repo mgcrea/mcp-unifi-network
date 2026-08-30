@@ -51,6 +51,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_get_health",
     {
+      title: "UniFi: Legacy Get Health",
       description:
         "Get the site's subsystem health — WAN, LAN, WLAN, VPN and WWW — with the number of " +
         "adopted, disconnected and pending devices in each, plus current throughput and latency. " +
@@ -66,6 +67,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_list_events",
     {
+      title: "UniFi: Legacy List Events",
       description:
         "List recent controller events for a site — clients joining and leaving, devices " +
         "restarting or being adopted, configuration changes and WAN transitions. " +
@@ -87,6 +89,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_list_alarms",
     {
+      title: "UniFi: Legacy List Alarms",
       description:
         "List the site's alarms — the events the controller considers actionable, such as a " +
         "device going down or a rogue access point appearing. Unarchived alarms are the ones " +
@@ -114,6 +117,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_list_known_clients",
     {
+      title: "UniFi: Legacy List Known Clients",
       description:
         "List every client the controller has EVER seen on a site, connected or not, with " +
         "whether each is blocked. This is the only way to answer questions about devices that " +
@@ -285,6 +289,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_unblock_client",
     {
+      title: "UniFi: Legacy Unblock Client",
       description:
         "Remove a client's block, letting it back onto the network. Safe to call on a client " +
         "that was never blocked. Identified by MAC address, not by the UUID the official API " +
@@ -303,6 +308,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_block_client",
     {
+      title: "UniFi: Legacy Block Client",
       description:
         "Block a client from the network by MAC address. It is disconnected immediately and " +
         "cannot reconnect on any SSID until unblocked, and it disappears from " +
@@ -322,6 +328,7 @@ export const registerLegacyTools = (
   server.registerTool(
     "unifi_legacy_reconnect_client",
     {
+      title: "UniFi: Legacy Reconnect Client",
       description:
         "Force a client to reconnect by kicking it off its access point. It normally rejoins " +
         "within seconds on its own — this is the usual fix for a device stuck on a distant AP or " +
@@ -357,6 +364,7 @@ export const registerLegacyRequestTool = (
   server.registerTool(
     "unifi_legacy_request",
     {
+      title: "UniFi: Legacy Request",
       description:
         "Escape hatch for the undocumented controller API — the operations the official API has " +
         "no equivalent for: port forwarding (`/api/s/<site>/rest/portforward`), device adoption " +

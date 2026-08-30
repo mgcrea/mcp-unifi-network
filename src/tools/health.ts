@@ -25,6 +25,7 @@ export const registerHealthTool = (
   server.registerTool(
     "unifi_health_check",
     {
+      title: "UniFi: Health Check",
       description:
         'One-call answer to "is my network OK?" — subsystem health (WAN, LAN, WLAN, VPN, ' +
         "internet latency), device firmware and adoption state, WiFi security posture, blocked " +

@@ -9,6 +9,7 @@ export const registerSiteTools = (server: McpServer, ctx: ToolContext): void => 
   server.registerTool(
     "unifi_list_sites",
     {
+      title: "UniFi: List Sites",
       description:
         "List the sites on this console with ALL THREE of their identifiers: the `id` (a UUID, " +
         "which is what this API's paths take), the `internalReference` (the legacy 8-character " +
@@ -28,6 +29,7 @@ export const registerSiteTools = (server: McpServer, ctx: ToolContext): void => 
   server.registerTool(
     "unifi_get_console_info",
     {
+      title: "UniFi: Get Console Info",
       description:
         "Report the console's UniFi Network version and which tools it supports. This API gained " +
         "most of its endpoints in Network 10.0, so on an older console a large part of the tool " +

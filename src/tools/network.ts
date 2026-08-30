@@ -18,6 +18,7 @@ export const registerNetworkTools = (server: McpServer, ctx: ToolContext): void 
   server.registerTool(
     "unifi_list_networks",
     {
+      title: "UniFi: List Networks",
       description:
         "List the networks (VLANs) configured on a site — their name, VLAN id, subnet, DHCP " +
         "settings and purpose. Read-only: this server does not create or modify networks, " +
@@ -41,6 +42,7 @@ export const registerNetworkTools = (server: McpServer, ctx: ToolContext): void 
   server.registerTool(
     "unifi_list_wlans",
     {
+      title: "UniFi: List WLANs",
       description:
         "List the WiFi broadcasts (SSIDs) on a site, with the network each is bridged to, its " +
         "security mode, band and whether it is enabled. Read-only for the same reason as " +

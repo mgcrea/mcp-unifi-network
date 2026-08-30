@@ -19,6 +19,7 @@ export const registerStatusTool = (server: McpServer, ctx: ToolContext): void =>
   server.registerTool(
     "unifi_auth_status",
     {
+      title: "UniFi: Auth Status",
       description:
         "Report whether this server can reach a UniFi console, which transport and site it uses, " +
         "what Network version the console runs, and — when something is missing — exactly what " +

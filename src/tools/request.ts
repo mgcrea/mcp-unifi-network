@@ -33,6 +33,7 @@ export const registerRequestTool = (server: McpServer, ctx: ToolContext): void =
   server.registerTool(
     "unifi_request",
     {
+      title: "UniFi: Request",
       description:
         "Escape hatch: call any Integration API endpoint directly, for the parts of the API this " +
         "server does not wrap — switch stacks, LAG, VPN servers, RADIUS profiles, WAN " +

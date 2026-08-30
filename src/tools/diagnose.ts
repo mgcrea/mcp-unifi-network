@@ -46,6 +46,7 @@ export const registerDiagnoseTool = (
   server.registerTool(
     "unifi_diagnose_client",
     {
+      title: "UniFi: Diagnose Client",
       description:
         'Answer "why will this device not connect?" for one client, in a single call. Give it a ' +
         "MAC, a name, or a fragment of either — it searches the LIVE clients and the full " +
