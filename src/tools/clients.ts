@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { summarizeClient, wrapCollected } from "../client/shape.js";
-import { and, eq, ge, like } from "../filter.js";
-import { normalizeMac } from "../mac.js";
-import { atLeast } from "../version.js";
-import type { ToolContext } from "./index.js";
-import { clientIdArg, compact, confirmArg, filterArg, limitArg, siteArg, wrap } from "./util.js";
+import { summarizeClient, wrapCollected } from "#/client/shape";
+import { and, eq, ge, like } from "#/filter";
+import { normalizeMac } from "#/mac";
+import type { ToolContext } from "#/tools/index";
+import { clientIdArg, compact, confirmArg, filterArg, limitArg, siteArg, wrap } from "#/tools/util";
+import { atLeast } from "#/version";
 
 const typeArg = z
   .enum(["WIRED", "WIRELESS", "VPN", "TELEPORT"])

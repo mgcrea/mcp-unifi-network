@@ -16,7 +16,7 @@ import {
   loadConfig,
   parseHost,
   setupInstructions,
-} from "../src/config.js";
+} from "#/config";
 
 const ABSENT = "/nonexistent/unifi-config.json";
 

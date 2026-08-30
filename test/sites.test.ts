@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SiteResolver, isUuid } from "../src/client/sites.js";
-import { UnifiClient } from "../src/client/unifi.js";
+import { SiteResolver, isUuid } from "#/client/sites";
+import { UnifiClient } from "#/client/unifi";
+
 import { SITES, SITE_UUID, SITE_UUID_2, jsonResponse, page } from "./harness.js";
 
 const makeClient = (sites = SITES) => {

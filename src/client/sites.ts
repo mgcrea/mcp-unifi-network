@@ -11,9 +11,9 @@
 // and translate, so a caller that guesses "default" succeeds on the first call
 // instead of burning a round trip on a 400.
 
-import type { Logger } from "./auth.js";
-import { SiteResolutionError } from "./errors.js";
-import type { Page, UnifiClient } from "./unifi.js";
+import type { Logger } from "#/client/auth";
+import { SiteResolutionError } from "#/client/errors";
+import type { Page, UnifiClient } from "#/client/unifi";
 
 export type SiteRef = {
   id: string;

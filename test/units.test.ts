@@ -4,12 +4,12 @@ import {
   summarizeKnownClient,
   summarizeLegacyDevice,
   summarizeLegacyEvent,
-} from "../src/client/legacy-shape.js";
-import { summarizeDevice, unwrapPage, wrapCollected } from "../src/client/shape.js";
-import { createHttpFetch } from "../src/client/tls.js";
-import { and, eq, inSet, like, not, or, quote } from "../src/filter.js";
-import { macCompact, normalizeMac } from "../src/mac.js";
-import { atLeast, describeTierGap, floorOf, parseVersion, tierFor } from "../src/version.js";
+} from "#/client/legacy-shape";
+import { summarizeDevice, unwrapPage, wrapCollected } from "#/client/shape";
+import { createHttpFetch } from "#/client/tls";
+import { and, eq, inSet, like, not, or, quote } from "#/filter";
+import { macCompact, normalizeMac } from "#/mac";
+import { atLeast, describeTierGap, floorOf, parseVersion, tierFor } from "#/version";
 
 describe("version tiers", () => {
   it("maps a version to what it unlocks", () => {

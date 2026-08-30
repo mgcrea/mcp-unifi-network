@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { UnifiApiError, UnifiLegacyError } from "../src/client/errors.js";
-import { UnifiLegacyClient } from "../src/client/legacy.js";
-import { probeConsole } from "../src/client/probe.js";
-import { UnifiClient } from "../src/client/unifi.js";
+import { UnifiApiError, UnifiLegacyError } from "#/client/errors";
+import { UnifiLegacyClient } from "#/client/legacy";
+import { probeConsole } from "#/client/probe";
+import { UnifiClient } from "#/client/unifi";
+
 import { jsonResponse, page, SITES } from "./harness.js";
 
 const BASE = "https://10.0.0.1/proxy/network/integration/v1";

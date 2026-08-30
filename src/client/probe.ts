@@ -3,12 +3,12 @@
 // it would make a test that forgets to mock `fetch` hang rather than fail. So
 // the probe runs in `cli.ts` and its result is passed INTO the factory.
 
-import { INTEGRATION_PATHS } from "../config.js";
-import { tierFor } from "../version.js";
-import type { VersionTier } from "../version.js";
-import type { Logger } from "./auth.js";
-import type { SiteRef } from "./sites.js";
-import type { Page, UnifiClient } from "./unifi.js";
+import type { Logger } from "#/client/auth";
+import type { SiteRef } from "#/client/sites";
+import type { Page, UnifiClient } from "#/client/unifi";
+import { INTEGRATION_PATHS } from "#/config";
+import { tierFor } from "#/version";
+import type { VersionTier } from "#/version";
 
 export type Probe = {
   appVersion: string | undefined;

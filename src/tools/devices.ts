@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { summarizeDevice, wrapCollected } from "../client/shape.js";
-import { and, eq, like } from "../filter.js";
-import { atLeast } from "../version.js";
-import type { ToolContext } from "./index.js";
-import { compact, confirmArg, deviceIdArg, filterArg, limitArg, siteArg, wrap } from "./util.js";
+import { summarizeDevice, wrapCollected } from "#/client/shape";
+import { and, eq, like } from "#/filter";
+import type { ToolContext } from "#/tools/index";
+import { compact, confirmArg, deviceIdArg, filterArg, limitArg, siteArg, wrap } from "#/tools/util";
+import { atLeast } from "#/version";
 
 const STATES = [
   "ONLINE",

@@ -1,21 +1,21 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import type { UnifiLegacyClient } from "../client/legacy.js";
-import type { Probe } from "../client/probe.js";
-import type { SiteResolver } from "../client/sites.js";
-import type { UnifiClient } from "../client/unifi.js";
-import { integrationReady, legacyReady } from "../config.js";
-import type { Config } from "../config.js";
-import { atLeast } from "../version.js";
-import { registerClientTools } from "./clients.js";
-import { registerDeviceTools } from "./devices.js";
-import { registerFirewallTools } from "./firewall.js";
-import { registerLegacyRequestTool, registerLegacyTools } from "./legacy.js";
-import { registerNetworkTools } from "./network.js";
-import { registerRequestTool } from "./request.js";
-import { registerSiteTools } from "./sites.js";
-import { registerStatusTool } from "./status.js";
-import { registerVoucherTools } from "./vouchers.js";
+import type { UnifiLegacyClient } from "#/client/legacy";
+import type { Probe } from "#/client/probe";
+import type { SiteResolver } from "#/client/sites";
+import type { UnifiClient } from "#/client/unifi";
+import { integrationReady, legacyReady } from "#/config";
+import type { Config } from "#/config";
+import { registerClientTools } from "#/tools/clients";
+import { registerDeviceTools } from "#/tools/devices";
+import { registerFirewallTools } from "#/tools/firewall";
+import { registerLegacyRequestTool, registerLegacyTools } from "#/tools/legacy";
+import { registerNetworkTools } from "#/tools/network";
+import { registerRequestTool } from "#/tools/request";
+import { registerSiteTools } from "#/tools/sites";
+import { registerStatusTool } from "#/tools/status";
+import { registerVoucherTools } from "#/tools/vouchers";
+import { atLeast } from "#/version";
 
 export type ToolContext = {
   config: Config;

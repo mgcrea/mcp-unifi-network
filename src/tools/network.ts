@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { wrapCollected } from "../client/shape.js";
-import type { ToolContext } from "./index.js";
-import { compact, filterArg, limitArg, siteArg, wrap } from "./util.js";
+import { wrapCollected } from "#/client/shape";
+import type { ToolContext } from "#/tools/index";
+import { compact, filterArg, limitArg, siteArg, wrap } from "#/tools/util";
 
 /**
  * Networks and WiFi broadcasts are READ-ONLY here.

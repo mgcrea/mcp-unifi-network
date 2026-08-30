@@ -6,9 +6,9 @@ import {
   legacyAuthMode,
   legacyReady,
   setupInstructions,
-} from "../config.js";
-import type { ToolContext } from "./index.js";
-import { wrap } from "./util.js";
+} from "#/config";
+import type { ToolContext } from "#/tools/index";
+import { wrap } from "#/tools/util";
 
 /**
  * The one tool that is always registered, before any credential check. An

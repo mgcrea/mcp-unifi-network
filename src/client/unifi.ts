@@ -2,10 +2,10 @@
 // (an `X-API-KEY` header, no cookie, no CSRF), and it answers every collection
 // with the same `{offset, limit, count, totalCount, data}` envelope.
 
-import type { Logger } from "./auth.js";
-import { UnifiApiError } from "./errors.js";
-import { buildQuery, encodeSegment, readBodyCapped, safeJsonParse, withRetry } from "./http.js";
-import type { Query } from "./http.js";
+import type { Logger } from "#/client/auth";
+import { UnifiApiError } from "#/client/errors";
+import { buildQuery, encodeSegment, readBodyCapped, safeJsonParse, withRetry } from "#/client/http";
+import type { Query } from "#/client/http";
 
 export type UnifiClientOptions = {
   baseUrl: string;

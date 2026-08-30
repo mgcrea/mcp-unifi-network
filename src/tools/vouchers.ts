@@ -1,10 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { wrapCollected } from "../client/shape.js";
-import { and, eq, like } from "../filter.js";
-import type { ToolContext } from "./index.js";
-import { compact, confirmArg, filterArg, limitArg, siteArg, wrap } from "./util.js";
+import { wrapCollected } from "#/client/shape";
+import { and, eq, like } from "#/filter";
+import type { ToolContext } from "#/tools/index";
+import { compact, confirmArg, filterArg, limitArg, siteArg, wrap } from "#/tools/util";
 
 export const registerVoucherTools = (server: McpServer, ctx: ToolContext): void => {
   const { client, sites, allowWrites } = ctx;

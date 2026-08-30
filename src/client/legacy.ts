@@ -8,10 +8,10 @@
 // says 200. Those differences are contained here and are not allowed to leak
 // into `http.ts`, which both transports share.
 
-import type { Logger } from "./auth.js";
-import { UnifiLegacyError } from "./errors.js";
-import { buildQuery, readBodyCapped, safeJsonParse, withRetry } from "./http.js";
-import type { Query } from "./http.js";
+import type { Logger } from "#/client/auth";
+import { UnifiLegacyError } from "#/client/errors";
+import { buildQuery, readBodyCapped, safeJsonParse, withRetry } from "#/client/http";
+import type { Query } from "#/client/http";
 
 export type LegacyClientOptions = {
   baseUrl: string;

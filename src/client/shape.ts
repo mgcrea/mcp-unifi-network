@@ -7,8 +7,8 @@
 // for shaping actually applies — the pagination envelope, and the one object
 // with nested sub-structures — and nowhere else.
 
-import { normalizeMac } from "../mac.js";
-import type { SiteRef } from "./sites.js";
+import type { SiteRef } from "#/client/sites";
+import { normalizeMac } from "#/mac";
 
 type Rec = Record<string, unknown>;
 

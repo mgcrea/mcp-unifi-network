@@ -4,13 +4,13 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { vi } from "vitest";
 import type { Mock } from "vitest";
 
-import { ASSUMED_PROBE } from "../src/client/probe.js";
-import type { Probe } from "../src/client/probe.js";
-import type { SiteResolver } from "../src/client/sites.js";
-import { loadConfig } from "../src/config.js";
-import type { Config } from "../src/config.js";
-import { createServer } from "../src/server.js";
-import { tierFor } from "../src/version.js";
+import { ASSUMED_PROBE } from "#/client/probe";
+import type { Probe } from "#/client/probe";
+import type { SiteResolver } from "#/client/sites";
+import { loadConfig } from "#/config";
+import type { Config } from "#/config";
+import { createServer } from "#/server";
+import { tierFor } from "#/version";
 
 /**
  * Passing an absent path stops a developer's real ~/.config/unifi/config.json

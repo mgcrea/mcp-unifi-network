@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { WritesDisabledError } from "../client/errors.js";
-import type { ToolContext } from "./index.js";
-import { compact, wrap } from "./util.js";
+import { WritesDisabledError } from "#/client/errors";
+import type { ToolContext } from "#/tools/index";
+import { compact, wrap } from "#/tools/util";
 
 /**
  * Reject anything that could leave this API, or climb out of it. An absolute

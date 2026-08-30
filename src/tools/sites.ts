@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { annotateSite } from "../client/shape.js";
-import { floorOf, TIERS, atLeast } from "../version.js";
-import type { ToolContext } from "./index.js";
-import { wrap } from "./util.js";
+import { annotateSite } from "#/client/shape";
+import type { ToolContext } from "#/tools/index";
+import { wrap } from "#/tools/util";
+import { floorOf, TIERS, atLeast } from "#/version";
 
 export const registerSiteTools = (server: McpServer, ctx: ToolContext): void => {
   server.registerTool(

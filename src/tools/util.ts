@@ -6,8 +6,8 @@ import {
   UnifiApiError,
   UnifiLegacyError,
   WritesDisabledError,
-} from "../client/errors.js";
-import { FILTER_ARG_DESCRIPTION } from "../filter.js";
+} from "#/client/errors";
+import { FILTER_ARG_DESCRIPTION } from "#/filter";
 
 export type ToolResult = {
   content: { type: "text"; text: string }[];

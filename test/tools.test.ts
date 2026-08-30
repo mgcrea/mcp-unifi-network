@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ASSUMED_PROBE } from "../src/client/probe.js";
+import { ASSUMED_PROBE } from "#/client/probe";
+
 import { connect, jsonResponse, page, probeFor, READY_ENV, SITE_UUID, SITES } from "./harness.js";
 
 const LEGACY_ENV = {

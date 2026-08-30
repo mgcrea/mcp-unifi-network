@@ -2,11 +2,11 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ZodError } from "zod";
 
-import { BUILD_INFO } from "./build-info.js";
-import { probeConsole, ASSUMED_PROBE } from "./client/probe.js";
-import type { Probe } from "./client/probe.js";
-import { createHttpFetch } from "./client/tls.js";
-import { UnifiClient } from "./client/unifi.js";
+import { BUILD_INFO } from "#/build-info";
+import { probeConsole, ASSUMED_PROBE } from "#/client/probe";
+import type { Probe } from "#/client/probe";
+import { createHttpFetch } from "#/client/tls";
+import { UnifiClient } from "#/client/unifi";
 import {
   integrationBaseUrl,
   integrationReady,
@@ -14,9 +14,9 @@ import {
   legacyReady,
   loadConfig,
   setupInstructions,
-} from "./config.js";
-import type { Config } from "./config.js";
-import { createServer, USER_AGENT } from "./server.js";
+} from "#/config";
+import type { Config } from "#/config";
+import { createServer, USER_AGENT } from "#/server";
 
 // Everything goes to stderr: stdout is the MCP protocol channel, and a stray
 // log line there corrupts the JSON-RPC stream — usually surfacing far from

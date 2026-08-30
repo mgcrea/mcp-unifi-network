@@ -1,13 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { BUILD_INFO } from "./build-info.js";
-import type { Logger } from "./client/auth.js";
-import { UnifiLegacyClient } from "./client/legacy.js";
-import { ASSUMED_PROBE } from "./client/probe.js";
-import type { Probe } from "./client/probe.js";
-import { SiteResolver } from "./client/sites.js";
-import { createHttpFetch } from "./client/tls.js";
-import { UnifiClient } from "./client/unifi.js";
+import { BUILD_INFO } from "#/build-info";
+import type { Logger } from "#/client/auth";
+import { UnifiLegacyClient } from "#/client/legacy";
+import { ASSUMED_PROBE } from "#/client/probe";
+import type { Probe } from "#/client/probe";
+import { SiteResolver } from "#/client/sites";
+import { createHttpFetch } from "#/client/tls";
+import { UnifiClient } from "#/client/unifi";
 import {
   integrationBaseUrl,
   integrationReady,
@@ -15,9 +15,9 @@ import {
   legacyBaseUrl,
   legacyLoginUrl,
   legacyReady,
-} from "./config.js";
-import type { Config } from "./config.js";
-import { registerTools } from "./tools/index.js";
+} from "#/config";
+import type { Config } from "#/config";
+import { registerTools } from "#/tools/index";
 
 export const SERVER_NAME = BUILD_INFO.name;
 export const SERVER_VERSION = BUILD_INFO.version;

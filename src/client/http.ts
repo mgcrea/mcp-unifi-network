@@ -2,8 +2,8 @@
 // nothing about UniFi's two very different response shapes. Both clients use it;
 // neither leaks its own envelope into it.
 
-import type { Logger } from "./auth.js";
-import { ResponseTooLargeError } from "./errors.js";
+import type { Logger } from "#/client/auth";
+import { ResponseTooLargeError } from "#/client/errors";
 
 export type Query = Record<string, string | number | boolean | undefined | (string | number)[]>;
 

@@ -1,13 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { WritesDisabledError } from "../client/errors.js";
-import { summarizeKnownClient, summarizeLegacyEvent } from "../client/legacy-shape.js";
-import type { UnifiLegacyClient } from "../client/legacy.js";
-import { normalizeMac } from "../mac.js";
-import type { ToolContext } from "./index.js";
-import { assertSafePath } from "./request.js";
-import { compact, confirmArg, macArg, siteArg, wrap } from "./util.js";
+import { WritesDisabledError } from "#/client/errors";
+import type { UnifiLegacyClient } from "#/client/legacy";
+import { summarizeKnownClient, summarizeLegacyEvent } from "#/client/legacy-shape";
+import { normalizeMac } from "#/mac";
+import type { ToolContext } from "#/tools/index";
+import { assertSafePath } from "#/tools/request";
+import { compact, confirmArg, macArg, siteArg, wrap } from "#/tools/util";
 
 const withinArg = z
   .number()

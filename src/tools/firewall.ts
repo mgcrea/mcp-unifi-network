@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { wrapCollected } from "../client/shape.js";
-import type { ToolContext } from "./index.js";
-import { compact, filterArg, limitArg, siteArg, wrap } from "./util.js";
+import { wrapCollected } from "#/client/shape";
+import type { ToolContext } from "#/tools/index";
+import { compact, filterArg, limitArg, siteArg, wrap } from "#/tools/util";
 
 /**
  * Firewall tools are READ-ONLY, and not because of the write flag.
