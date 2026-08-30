@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "unifi": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-unifi-network/dist/cli.js"],
+      "env": {
+        "UNIFI_HOST": "192.168.1.1",
+        "UNIFI_API_KEY": "",
+        "UNIFI_SITE": "",
+        "UNIFI_INSECURE_TLS": "",
+        "UNIFI_ALLOW_WRITES": "",
+        "UNIFI_ENABLE_LEGACY": "",
+        "UNIFI_USERNAME": "",
+        "UNIFI_PASSWORD": ""
+      }
+    }
+  }
+}
