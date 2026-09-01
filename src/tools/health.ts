@@ -10,6 +10,11 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 
+/** One legacy read: the records it yielded, and whether the console answered at all. */
+type Read = { rows: Rec[]; ok: boolean };
+
+const describe = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 /**
  * Findings are ranked by what they cost when wrong, not by which subsystem they
  * came from — a reader who has to re-sort the list will skim past the one that
@@ -41,19 +46,46 @@ export const registerHealthTool = (
       wrap(async () => {
         const name = await ctx.sites.resolveLegacyName(site);
         const path = (suffix: string) => `/api/s/${encodeURIComponent(name)}${suffix}`;
-        const nothing = [] as unknown[];
-        const [health, devices, wlans, roster] = await Promise.all([
-          legacy.request<unknown[]>("GET", path("/stat/health")).catch(() => nothing),
-          legacy.request<unknown[]>("GET", path("/stat/device")).catch(() => nothing),
-          legacy.request<unknown[]>("GET", path("/rest/wlanconf")).catch(() => nothing),
-          legacy.request<unknown[]>("GET", path("/rest/user")).catch(() => nothing),
-        ]);
 
         const findings: Finding[] = [];
         const add = (severity: Finding["severity"], area: string, detail: string) =>
           findings.push({ severity, area, detail });
 
-        const subsystems = (health as Rec[]).filter(isRec);
+        /**
+         * One read, degrading to an empty list but never to silence.
+         *
+         * These four used to be `.catch(() => [])`, which made this the only
+         * tool here incapable of reporting a broken transport: with every call
+         * rejected, nothing reached `findings`, and `ok` — an `every()` over an
+         * empty array — came back `true`. A console answering 401 to everything
+         * reported as a healthy network, which is the exact opposite of what
+         * this tool is called to find out. Degrading is still right, because one
+         * dead endpoint must not cost the other three; degrading QUIETLY was the
+         * bug. The rejection already carries its own remedy from
+         * `UnifiLegacyError` — pass it through rather than restating it.
+         */
+        const read = async (label: string, suffix: string): Promise<Read> => {
+          try {
+            const data = await legacy.request<unknown[]>("GET", path(suffix));
+            return { rows: (Array.isArray(data) ? data : []).filter(isRec), ok: true };
+          } catch (err) {
+            add(
+              "warn",
+              "transport",
+              `Could not read ${label} from ${path(suffix)} — ${describe(err)}`,
+            );
+            return { rows: [], ok: false };
+          }
+        };
+
+        const [health, devices, wlans, roster] = await Promise.all([
+          read("subsystem health", "/stat/health"),
+          read("the device list", "/stat/device"),
+          read("the WLAN configuration", "/rest/wlanconf"),
+          read("the known-client roster", "/rest/user"),
+        ]);
+
+        const subsystems = health.rows;
         for (const s of subsystems) {
           const sub = String(s.subsystem ?? "?");
           if (s.status !== "ok") add("warn", sub, `Subsystem status is "${String(s.status)}".`);
@@ -68,7 +100,7 @@ export const registerHealthTool = (
           }
         }
 
-        const devs = (devices as Rec[]).filter(isRec);
+        const devs = devices.rows;
         const upgradable = devs.filter((d) => d.upgradable === true);
         if (upgradable.length > 0) {
           add(
@@ -87,7 +119,7 @@ export const registerHealthTool = (
           );
         }
 
-        const nets = (wlans as Rec[]).filter(isRec).filter((w) => w.name);
+        const nets = wlans.rows.filter((w) => w.name);
         for (const w of nets) {
           const ssid = String(w.name);
           if (w.enabled === false) {
@@ -116,7 +148,7 @@ export const registerHealthTool = (
           }
         }
 
-        const clients = (roster as Rec[]).filter(isRec);
+        const clients = roster.rows;
         const blocked = clients.filter((c) => c.blocked === true);
         if (blocked.length > 0) {
           add(
@@ -142,15 +174,29 @@ export const registerHealthTool = (
         const order = { warn: 0, note: 1 } as const;
         findings.sort((a, b) => order[a.severity] - order[b.severity]);
 
+        const unavailable = Object.entries({ health, devices, wlans, roster })
+          .filter(([, r]) => !r.ok)
+          .map(([key]) => key);
+
         return {
-          ok: findings.every((f) => f.severity !== "warn"),
+          // `every` over an empty array is `true`, so a run in which nothing
+          // could be read must never reach this as a clean sweep. Each failed
+          // read files its own `warn` above, and `unavailable` names them.
+          ok: unavailable.length === 0 && findings.every((f) => f.severity !== "warn"),
+          ...(unavailable.length > 0 ? { unavailable } : {}),
           summary: {
-            subsystems: Object.fromEntries(
-              subsystems.map((s) => [String(s.subsystem), String(s.status)]),
-            ),
-            devices: { total: devs.length, upgradable: upgradable.length },
-            wifi: { ssids: nets.length, enabled: nets.filter((w) => w.enabled !== false).length },
-            clients: { known: clients.length, blocked: blocked.length },
+            // `null`, not `{}` or `0`. "Could not read the device list" and
+            // "this console has no devices" are different answers, and
+            // collapsing them is precisely how the broken case came to look
+            // identical to the healthy one.
+            subsystems: health.ok
+              ? Object.fromEntries(subsystems.map((s) => [String(s.subsystem), String(s.status)]))
+              : null,
+            devices: devices.ok ? { total: devs.length, upgradable: upgradable.length } : null,
+            wifi: wlans.ok
+              ? { ssids: nets.length, enabled: nets.filter((w) => w.enabled !== false).length }
+              : null,
+            clients: roster.ok ? { known: clients.length, blocked: blocked.length } : null,
             consoleVersion: ctx.probe.appVersion ?? null,
           },
           findings,

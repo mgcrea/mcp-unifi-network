@@ -505,6 +505,63 @@ describe("unifi_health_check", () => {
     const res = await server.call("unifi_health_check", {});
     expect(JSON.stringify(res.findings)).toMatch(/disabled or paused/);
   });
+
+  // The regression this tool was built to make impossible and then caused
+  // itself. Every legacy read rejected, and it answered `ok: true` with an
+  // empty summary — a console refusing every request, reported as a healthy
+  // network. `ok` was `findings.every(...)` over an empty array.
+  it("reports a wholly rejected transport as broken, not as healthy", async () => {
+    // A bare 401 with no `meta.msg` is what a rejected API key actually looks
+    // like on this API — `api.err.LoginRequired` is the cookie-session flavour.
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).includes("/api/s/")
+        ? jsonResponse({}, { status: 401 })
+        : jsonResponse(page(SITES)),
+    );
+    const server = await connect({ env: LEGACY_KEY_ENV, fetchImpl: fetchMock });
+    const res = await server.call("unifi_health_check", {});
+
+    expect(res.ok).toBe(false);
+    expect(res.unavailable).toEqual(["health", "devices", "wlans", "roster"]);
+    const findings = res.findings as { severity: string; area: string; detail: string }[];
+    expect(findings).toHaveLength(4);
+    expect(findings.every((f) => f.severity === "warn" && f.area === "transport")).toBe(true);
+    // The remedy the legacy client already attaches to a 401 must survive the
+    // trip: without it the reader is told "something failed" and nothing else.
+    expect(JSON.stringify(findings)).toMatch(/401/);
+    expect(JSON.stringify(findings)).toMatch(/UNIFI_API_KEY|session was rejected/);
+
+    // A count of zero is a claim about the network; these must not make it.
+    const summary = res.summary as Record<string, unknown>;
+    expect(summary.subsystems).toBeNull();
+    expect(summary.devices).toBeNull();
+    expect(summary.wifi).toBeNull();
+    expect(summary.clients).toBeNull();
+  });
+
+  // The other half of the same rule: one dead endpoint must not cost the other
+  // three, or fixing the silence above would just trade it for a hard failure.
+  it("still answers when one read fails, and names the one that did", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      // 403, not 500: a 5xx is retried with backoff and would spend the whole
+      // test budget sleeping. What is under test is the degradation, not the
+      // retry policy.
+      if (u.includes("/stat/device"))
+        return jsonResponse({ meta: { rc: "error" } }, { status: 403 });
+      if (u.includes("/stat/health")) return rcOk([{ subsystem: "wan", status: "ok" }]);
+      if (u.includes("/api/s/")) return rcOk([]);
+      return jsonResponse(page(SITES));
+    });
+    const server = await connect({ env: LEGACY_KEY_ENV, fetchImpl: fetchMock });
+    const res = await server.call("unifi_health_check", {});
+
+    expect(res.unavailable).toEqual(["devices"]);
+    expect(res.ok).toBe(false);
+    // The three that answered still report; only the dead one goes null.
+    expect(res.summary).toMatchObject({ subsystems: { wan: "ok" }, devices: null });
+    expect((res.summary as { clients: unknown }).clients).not.toBeNull();
+  });
 });
 
 describe("new-device detection and the troubleshooting resource", () => {
