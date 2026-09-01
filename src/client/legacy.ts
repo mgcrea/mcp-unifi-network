@@ -275,6 +275,17 @@ export class UnifiLegacyClient {
     const base = `UniFi legacy API ${res.status} on ${path}${msg ? ` [${msg}]` : ""}`;
     const remedy = LEGACY_REMEDIES[msg];
     if (remedy) return `${base} — ${remedy}`;
+    // The login endpoint has no CSRF token and no session yet, so the generic
+    // 401/403 advice below is actively misleading here: it sends the reader
+    // after a stale token when the console simply refused the credentials.
+    if (path === "login" && (res.status === 401 || res.status === 403)) {
+      return (
+        `${base} — the console refused these credentials. UNIFI_USERNAME must be a LOCAL ` +
+        `console admin, not a Ubiquiti SSO account, and the account must not have two-factor ` +
+        `authentication enabled. On UniFi OS you can drop the account entirely: UNIFI_API_KEY ` +
+        `alone authenticates the legacy paths too.`
+      );
+    }
     if (res.status === 403) {
       return (
         `${base} — a bare 403 from this API almost always means a missing or stale CSRF token. ` +
