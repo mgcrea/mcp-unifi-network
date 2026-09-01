@@ -584,3 +584,23 @@ describe("prompts (the client's slash commands)", () => {
     }
   });
 });
+
+describe("a 401 that no retry can fix", () => {
+  // Key auth is stateless: there is no session to invalidate, so re-sending a
+  // request the console has already refused only multiplies the failure.
+  it("is sent once in key mode, not maxRetries+1 times", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).includes("/api/s/")
+        ? jsonResponse({}, { status: 401 })
+        : jsonResponse(page(SITES)),
+    );
+    const server = await connect({
+      env: { ...READY_ENV, UNIFI_ENABLE_LEGACY: "1" },
+      fetchImpl: fetchMock,
+    });
+    const res = await server.call("unifi_legacy_get_health", {});
+
+    expect(res.isToolError).toBe(true);
+    expect(server.urls().filter((u) => u.includes("/stat/health"))).toHaveLength(1);
+  });
+});

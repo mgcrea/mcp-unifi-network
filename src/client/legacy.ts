@@ -223,7 +223,12 @@ export class UnifiLegacyClient {
         maxRetries: this.maxRetries,
         label: `[unifi-legacy] ${method} ${path}`,
         logger: this.logger,
-        onUnauthorized: () => this.invalidate(),
+        // Only when there is actually a session to re-establish. In key mode
+        // `invalidate()` clears a session that never existed, so retrying a 401
+        // repeats a request the console has already refused — four round trips
+        // per call, sixteen for one health check, and four times the log noise
+        // in exactly the situation someone is trying to read the log.
+        ...(this.apiKey ? {} : { onUnauthorized: () => this.invalidate() }),
       },
     );
 
