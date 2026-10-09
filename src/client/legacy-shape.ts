@@ -107,6 +107,58 @@ export const summarizeLegacyEvent = (event: unknown): unknown => {
   ]);
 };
 
+const paramName = (param: unknown): string | undefined =>
+  isRecord(param) && typeof param.name === "string" ? param.name : undefined;
+
+/**
+ * Trim a v2 `system-log` entry — the event log UniFi Network 9 replaced
+ * `stat/event` with — to one readable line.
+ *
+ * Each entry is ~1.7 KB, almost all of it the `parameters` table that fills the
+ * `{PLACEHOLDER}`s in `message_raw`: fingerprint ids, network ids, firmware
+ * versions. Rendering the template here keeps what the console's own UI would
+ * show and drops the rest. The client gets its MAC alongside its name, because
+ * appliances are often named after their model and the MAC is what ties an
+ * event to the device someone is asking about.
+ */
+export const summarizeSystemLogEvent = (event: unknown): unknown => {
+  if (!isRecord(event)) return event;
+  const params = isRecord(event.parameters) ? event.parameters : {};
+  const client = isRecord(params.CLIENT) ? params.CLIENT : undefined;
+  const clientMac = typeof client?.id === "string" ? client.id : undefined;
+
+  const render = (key: string): string | undefined => {
+    const name = paramName(params[key]);
+    if (key === "CLIENT" && name && clientMac && name !== clientMac)
+      return `${name} (${clientMac})`;
+    return name ?? (key === "CLIENT" ? clientMac : undefined);
+  };
+  const message =
+    typeof event.message_raw === "string"
+      ? event.message_raw.replace(/\{([A-Z_]+)\}/g, (match, key: string) => render(key) ?? match)
+      : undefined;
+
+  const summary: Rec = pick(
+    {
+      id: event.id,
+      time:
+        typeof event.timestamp === "number" ? new Date(event.timestamp).toISOString() : undefined,
+      event: event.event,
+      title: event.title_raw,
+      severity: event.severity,
+      message,
+    },
+    ["id", "time", "event", "title", "severity", "message"],
+  );
+  if (client)
+    summary.client = pick({ mac: clientMac, name: client.name, ip: client.ip }, [
+      "mac",
+      "name",
+      "ip",
+    ]);
+  return summary;
+};
+
 /**
  * A known client from `rest/user` — the controller's roster of every device it
  * has ever seen, which is a different set from the connected clients the

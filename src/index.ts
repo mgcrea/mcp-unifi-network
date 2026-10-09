@@ -60,6 +60,7 @@ export {
   summarizeLegacyClient,
   summarizeLegacyDevice,
   summarizeLegacyEvent,
+  summarizeSystemLogEvent,
 } from "#/client/legacy-shape";
 
 export { registerTools } from "#/tools/index";

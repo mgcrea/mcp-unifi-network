@@ -4,6 +4,7 @@ import {
   summarizeKnownClient,
   summarizeLegacyDevice,
   summarizeLegacyEvent,
+  summarizeSystemLogEvent,
 } from "#/client/legacy-shape";
 import { summarizeDevice, unwrapPage, wrapCollected } from "#/client/shape";
 import { createHttpFetch } from "#/client/tls";
@@ -171,6 +172,68 @@ describe("legacy projection", () => {
     }) as Record<string, unknown>;
     expect(shaped.key).toBe("EVT_WU_Connected");
     expect(shaped).not.toHaveProperty("noise");
+  });
+
+  // Trimmed from a real UniFi Network 9 console: the raw entry is ~1.7 KB.
+  const DISCONNECT = {
+    category: "CLIENT_DEVICES",
+    event: "CLIENT_DISCONNECTED_WIRELESS",
+    id: "6ac579e63e6ab386f4379578",
+    key: "CLIENT_DISCONNECTED_WIRELESS_2",
+    message_raw:
+      "{CLIENT} disconnected from {WLAN}. Time Connected: {DURATION}. Data Used: {DATA_UP} " +
+      "(up) / {DATA_DOWN} (down). Last Connected To: {DEVICE} at {SIGNAL_STRENGTH} dBm.",
+    parameters: {
+      AVG_UTILIZATION: { name: "36" },
+      CHANNEL: { name: "6" },
+      CLIENT: { id: "20:58:43:b9:c2:6a", ip: "192.168.8.228", name: "MSZ-AY-VGK2-1" },
+      DATA_UP: { id: "137915814", name: "131.53 MB", not_actionable: true },
+      DATA_DOWN: { id: "7003168", name: "6.68 MB", not_actionable: true },
+      SIGNAL_STRENGTH: { name: "-59" },
+      DEVICE: {
+        device_fingerprint_id: 2651,
+        id: "80:2a:a8:c0:27:f4",
+        ip: "192.168.6.76",
+        model: "UAP-AC-Pro",
+        name: "UAP-AC-Pro Grenier",
+        version: "6.8.2",
+      },
+      DURATION: { id: "1770833", name: "20d 11h", not_actionable: true },
+      WLAN: { id: "6383d06288918f078bf0f3db", name: "JavaSystem" },
+    },
+    severity: "LOW",
+    show_on_dashboard: false,
+    status: "NEW",
+    subcategory: "MONITORING_WIFI",
+    target: "CLIENT",
+    timestamp: 1_791_326_694_190,
+    title_raw: "WiFi Client Disconnected",
+    type: "CLIENT_CONNECTION",
+  };
+
+  it("renders a system-log entry into the sentence the console would show", () => {
+    const shaped = summarizeSystemLogEvent(DISCONNECT) as Record<string, unknown>;
+    expect(shaped).toEqual({
+      id: "6ac579e63e6ab386f4379578",
+      time: "2026-10-06T22:44:54.190Z",
+      event: "CLIENT_DISCONNECTED_WIRELESS",
+      title: "WiFi Client Disconnected",
+      severity: "LOW",
+      message:
+        "MSZ-AY-VGK2-1 (20:58:43:b9:c2:6a) disconnected from JavaSystem. Time Connected: " +
+        "20d 11h. Data Used: 131.53 MB (up) / 6.68 MB (down). Last Connected To: " +
+        "UAP-AC-Pro Grenier at -59 dBm.",
+      client: { mac: "20:58:43:b9:c2:6a", name: "MSZ-AY-VGK2-1", ip: "192.168.8.228" },
+    });
+    expect(JSON.stringify(shaped).length).toBeLessThan(JSON.stringify(DISCONNECT).length / 2);
+  });
+
+  it("leaves a placeholder it has no parameter for rather than dropping it", () => {
+    const shaped = summarizeSystemLogEvent({
+      ...DISCONNECT,
+      message_raw: "{CLIENT} did {SOMETHING_NEW}",
+    }) as Record<string, unknown>;
+    expect(shaped.message).toBe("MSZ-AY-VGK2-1 (20:58:43:b9:c2:6a) did {SOMETHING_NEW}");
   });
 });
 

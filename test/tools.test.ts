@@ -400,6 +400,97 @@ describe("unifi_legacy_list_known_clients", () => {
 });
 
 const LEGACY_KEY_ENV = { ...READY_ENV, UNIFI_ENABLE_LEGACY: "1" };
+
+describe("unifi_legacy_list_events", () => {
+  const ENTRY = {
+    id: "e1",
+    event: "CLIENT_ROAMED",
+    title_raw: "WiFi Client Roamed",
+    severity: "LOW",
+    message_raw: "{CLIENT} roamed to {DEVICE_TO}.",
+    parameters: {
+      CLIENT: { id: "b8:82:f2:c5:8b:38", name: "Heat pump" },
+      DEVICE_TO: { name: "AP Attic" },
+    },
+    timestamp: 1_791_527_721_561,
+  };
+
+  /** A console that either has the v2 system log or only the old `stat/event`. */
+  const serve = async (opts: { systemLog: boolean }) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/system-log/")) {
+        return opts.systemLog ? jsonResponse([ENTRY]) : new Response("Not Found", { status: 404 });
+      }
+      if (u.includes("/stat/event")) {
+        return jsonResponse({
+          meta: { rc: "ok" },
+          data: [
+            { _id: "o1", key: "EVT_WU_Connected", msg: "User[b8:82:f2:c5:8b:38] connected" },
+            { _id: "o2", key: "EVT_WU_Connected", msg: "User[aa:aa:aa:aa:aa:aa] connected" },
+          ],
+        });
+      }
+      return jsonResponse(page(SITES));
+    });
+    const server = await connect({ env: LEGACY_KEY_ENV, fetchImpl: fetchMock });
+    const systemLogBody = () => {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/system-log/"));
+      return call ? JSON.parse(String(call[1]?.body)) : undefined;
+    };
+    return { server, fetchMock, systemLogBody };
+  };
+
+  // UniFi Network 9 removed `stat/event`: it answers 404 there, which made this
+  // tool fail outright on current consoles.
+  it("reads the v2 system log and renders each entry", async () => {
+    const { server } = await serve({ systemLog: true });
+    const res = await server.call("unifi_legacy_list_events", {});
+    expect(res.isToolError).toBe(false);
+    expect(res.source).toBe("system-log");
+    expect(res.data).toEqual([
+      expect.objectContaining({ message: "Heat pump (b8:82:f2:c5:8b:38) roamed to AP Attic." }),
+    ]);
+  });
+
+  it("asks for the window and page size the caller gave", async () => {
+    vi.useFakeTimers({ now: 1_791_530_000_000, toFake: ["Date"] });
+    try {
+      const { server, systemLogBody } = await serve({ systemLog: true });
+      await server.call("unifi_legacy_list_events", { within: 48, limit: 20 });
+      expect(systemLogBody()).toEqual({
+        timestampFrom: 1_791_530_000_000 - 48 * 3_600_000,
+        timestampTo: 1_791_530_000_000,
+        pageNumber: 0,
+        pageSize: 20,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The console ignores `macs` and `clientMacs` and returns everything;
+  // `searchText` is the only filter it honours.
+  it("filters by client through searchText", async () => {
+    const { server, systemLogBody } = await serve({ systemLog: true });
+    await server.call("unifi_legacy_list_events", { client: "B8-82-F2-C5-8B-38" });
+    expect(systemLogBody().searchText).toBe("b8:82:f2:c5:8b:38");
+  });
+
+  it("passes a name fragment through as typed", async () => {
+    const { server, systemLogBody } = await serve({ systemLog: true });
+    await server.call("unifi_legacy_list_events", { client: "MSZ-AY" });
+    expect(systemLogBody().searchText).toBe("MSZ-AY");
+  });
+
+  it("falls back to stat/event on a console without the system log", async () => {
+    const { server } = await serve({ systemLog: false });
+    const res = await server.call("unifi_legacy_list_events", { client: "b8:82:f2:c5:8b:38" });
+    expect(res.isToolError).toBe(false);
+    expect(res.source).toBe("stat/event");
+    expect(res.data).toEqual([expect.objectContaining({ _id: "o1" })]);
+  });
+});
 const rcOk = (data: unknown[]) => jsonResponse({ meta: { rc: "ok" }, data });
 
 /** Serves the four legacy reads the composite tools fan out to. */

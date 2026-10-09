@@ -1,9 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import { WritesDisabledError } from "#/client/errors";
+import { UnifiLegacyError, WritesDisabledError } from "#/client/errors";
 import type { UnifiLegacyClient } from "#/client/legacy";
-import { summarizeKnownClient, summarizeLegacyEvent } from "#/client/legacy-shape";
+import {
+  summarizeKnownClient,
+  summarizeLegacyEvent,
+  summarizeSystemLogEvent,
+} from "#/client/legacy-shape";
 import { normalizeMac } from "#/mac";
 import type { ToolContext } from "#/tools/index";
 import { assertSafePath } from "#/tools/request";
@@ -27,6 +31,15 @@ const legacyLimitArg = z
     "Maximum rows to return (1-500). Defaults to 50. The controller stores thousands of events, " +
       "and they are verbose — raise this deliberately.",
   );
+
+/** A MAC in canonical form if it is one, otherwise the text as typed. */
+const asMacOrText = (value: string): string => {
+  try {
+    return normalizeMac(value);
+  } catch {
+    return value.trim();
+  }
+};
 
 /**
  * The legacy controller API, wrapped only where the official one has no answer:
@@ -69,20 +82,73 @@ export const registerLegacyTools = (
     {
       title: "UniFi: Legacy List Events",
       description:
-        "List recent controller events for a site — clients joining and leaving, devices " +
-        "restarting or being adopted, configuration changes and WAN transitions. " +
-        'Use this to answer "what happened" questions; the official API exposes no event log ' +
-        "at all. Events are verbose, so keep `limit` low and narrow `within` first.",
-      inputSchema: z.object({ site: siteArg, within: withinArg, limit: legacyLimitArg }),
+        "List recent controller events for a site, newest first — clients joining, leaving " +
+        "and roaming between access points (with signal strength and how long they had been " +
+        "connected), devices restarting or being adopted, configuration changes and WAN " +
+        'transitions. Use this to answer "what happened" questions; the official API exposes ' +
+        "no event log at all. Pass `client` to follow one device: it is the way to answer " +
+        '"when did this drop off, and has it happened before?". Events are verbose, so keep ' +
+        "`limit` low and narrow `within` first.",
+      inputSchema: z.object({
+        site: siteArg,
+        within: withinArg,
+        limit: legacyLimitArg,
+        client: z
+          .string()
+          .min(2)
+          .optional()
+          .describe(
+            "Only events mentioning this client: a MAC address in any common format, or a " +
+              "fragment of its name. Matched by the console itself, so a filtered call reaches " +
+              "further back than a page of everything would.",
+          ),
+      }),
       annotations: { readOnlyHint: true },
     },
-    async ({ site, within, limit }) =>
+    async ({ site, within, limit, client }) =>
       wrap(async () => {
+        const search = client === undefined ? undefined : asMacOrText(client);
+
+        // UniFi Network 9 replaced `stat/event` with the v2 system log, and the
+        // old path answers 404 there. Ask for the new one first and fall back
+        // only when the console has never heard of it.
+        try {
+          const now = Date.now();
+          const data = await legacy.request<unknown[]>(
+            "POST",
+            `/v2/api/site/${encodeURIComponent(await ctx.sites.resolveLegacyName(site))}/system-log/all`,
+            {
+              // Only `searchText` filters: `macs` and `clientMacs` are accepted
+              // and silently ignored, returning every client's events.
+              body: compact({
+                timestampFrom: now - within * 3_600_000,
+                timestampTo: now,
+                pageNumber: 0,
+                pageSize: limit,
+                searchText: search,
+              }),
+            },
+          );
+          const rows = Array.isArray(data) ? data : [];
+          return {
+            data: rows.map(summarizeSystemLogEvent),
+            count: rows.length,
+            source: "system-log",
+          };
+        } catch (err) {
+          if (!(err instanceof UnifiLegacyError && err.status === 404)) throw err;
+        }
+
         const data = await legacy.request<unknown[]>("GET", await sitePath(site, "/stat/event"), {
           query: { within, _limit: limit, _sort: "-time" },
         });
-        const rows = Array.isArray(data) ? data : [];
-        return { data: rows.map(summarizeLegacyEvent), count: rows.length };
+        // The old endpoint has no search, so the filter applies to the page it returned.
+        const rows = (Array.isArray(data) ? data : []).filter(
+          (row) =>
+            search === undefined ||
+            JSON.stringify(row).toLowerCase().includes(search.toLowerCase()),
+        );
+        return { data: rows.map(summarizeLegacyEvent), count: rows.length, source: "stat/event" };
       }),
   );
 
