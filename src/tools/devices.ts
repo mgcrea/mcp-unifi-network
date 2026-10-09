@@ -143,7 +143,8 @@ export const registerDeviceTools = (server: McpServer, ctx: ToolContext): void =
           "Power-cycle one PoE port on a switch, rebooting whatever is plugged into it. Use this " +
           "to reboot a camera, phone or access point that has no restart tool of its own. " +
           "The port index is the physical port number as shown in the UniFi UI, from " +
-          "`unifi_get_device`'s `interfaces.ports`.",
+          "`unifi_get_device`'s `interfaces.ports`. For a device that is offline, " +
+          "`unifi_diagnose_client` finds the switch and port it was last plugged into.",
         inputSchema: z.object({
           site: siteArg,
           deviceId: deviceIdArg.describe(

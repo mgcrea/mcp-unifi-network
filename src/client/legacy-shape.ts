@@ -224,6 +224,13 @@ export const summarizeKnownClient = (
   if (out.daysSinceSeen === undefined) delete out.daysSinceSeen;
   if (client.last_ip) out.lastIp = client.last_ip;
   if (client.last_uplink_name) out.lastUplink = client.last_uplink_name;
+  // For a wired client, the switch and port it was last plugged into — the one
+  // record of where an offline PoE device can be rebooted from. A wireless
+  // client has an AP here and no port.
+  if (client.last_uplink_mac) out.lastUplinkMac = client.last_uplink_mac;
+  if (typeof client.last_uplink_remote_port === "number") {
+    out.lastUplinkPort = client.last_uplink_remote_port;
+  }
   if (client.last_connection_network_name) out.network = client.last_connection_network_name;
   if (client.use_fixedip === true && client.fixed_ip) out.fixedIp = client.fixed_ip;
   if (client.note) out.note = client.note;

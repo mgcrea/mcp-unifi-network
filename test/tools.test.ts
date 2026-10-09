@@ -4,6 +4,8 @@ import { ASSUMED_PROBE } from "#/client/probe";
 
 import { connect, jsonResponse, page, probeFor, READY_ENV, SITE_UUID, SITES } from "./harness.js";
 
+type Rec = Record<string, unknown>;
+
 const LEGACY_ENV = {
   ...READY_ENV,
   UNIFI_ENABLE_LEGACY: "1",
@@ -564,6 +566,140 @@ describe("unifi_diagnose_client", () => {
     for (const spelling of ["AA:AA:AA:AA:AA:01", "aaaaaaaaaa01", "aa-aa-aa-aa-aa-01"]) {
       expect((await diagnose(spelling)).found).toBe(true);
     }
+  });
+
+  // "Bedroom" has two hex letters in a row, which used to be enough to be
+  // taken for a MAC — and normalizing it threw, so the search never ran.
+  it("searches a name that merely contains hex letters", async () => {
+    const res = await diagnose("Bedroom");
+    expect(res.isToolError).toBe(false);
+    expect(res.verdict).toBe("absent");
+  });
+});
+
+describe("unifi_diagnose_client on a wired device", () => {
+  const SWITCH_MAC = "78:8a:20:7f:ac:e4";
+  const SWITCH_ID = "5a05fc6d-c3cc-30c7-b13b-b049def8b54d";
+  const CHIME = {
+    mac: "f4:e2:c6:0c:fa:e3",
+    name: "Chime",
+    is_wired: true,
+    last_seen: 1_780_000_000,
+    last_uplink_mac: SWITCH_MAC,
+    last_uplink_name: "Switch Cellar",
+    last_uplink_remote_port: 8,
+  };
+  const PORTS = [
+    { idx: 1, state: "UP", connector: "RJ45" },
+    {
+      idx: 8,
+      state: "DOWN",
+      connector: "RJ45",
+      poe: { standard: "802.3af", type: 1, enabled: true, state: "DOWN" },
+    },
+  ];
+
+  /** Legacy roster plus the Integration device endpoints the port lookup needs. */
+  const serve = async (opts: {
+    user: unknown[];
+    switchFound?: boolean;
+    env?: Record<string, string>;
+  }) => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = decodeURIComponent(String(url));
+      if (u.includes("/rest/user")) return rcOk(opts.user);
+      if (u.includes("/stat/sta")) return rcOk([]);
+      if (u.includes(`/devices/${SWITCH_ID}`)) {
+        return jsonResponse({ id: SWITCH_ID, name: "Switch Cellar", interfaces: { ports: PORTS } });
+      }
+      if (u.includes("/devices")) {
+        return jsonResponse(
+          page(opts.switchFound === false ? [] : [{ id: SWITCH_ID, macAddress: SWITCH_MAC }]),
+        );
+      }
+      return jsonResponse(page(SITES));
+    });
+    const server = await connect({ env: opts.env ?? LEGACY_KEY_ENV, fetchImpl: fetchMock });
+    const res = await server.call("unifi_diagnose_client", { device: "Chime" });
+    return { res, urls: server.urls().map((u) => decodeURIComponent(u)) };
+  };
+  const first = (res: Record<string, unknown>) => (res.results as Record<string, unknown>[])[0];
+  const lastPort = (res: Record<string, unknown>) => (first(res)?.lastPort ?? {}) as Rec;
+
+  // The point: an offline PoE device can only be rebooted through the port it
+  // is plugged into, and nothing else answers which port that was.
+  it("names the switch port it was last on and how to power-cycle it", async () => {
+    const { res, urls } = await serve({ user: [CHIME] });
+    expect(first(res)?.verdict).toBe("known_offline");
+    expect(first(res)?.lastPort).toEqual({
+      switchName: "Switch Cellar",
+      switchMac: SWITCH_MAC,
+      switchId: SWITCH_ID,
+      portIdx: 8,
+      linkState: "DOWN",
+      poe: { standard: "802.3af", enabled: true, state: "DOWN" },
+      powerCycle: expect.stringContaining(`unifi_power_cycle_port`),
+    });
+    expect(String(lastPort(res).powerCycle)).toContain(SWITCH_ID);
+    // Looked up by MAC on the console, not by listing every device.
+    expect(urls.some((u) => u.includes(`macAddress.eq('${SWITCH_MAC}')`))).toBe(true);
+  });
+
+  it("says when writes must be enabled first", async () => {
+    const { res } = await serve({ user: [CHIME] });
+    expect(String(lastPort(res).powerCycle)).toMatch(/UNIFI_ALLOW_WRITES/);
+    const writable = await serve({
+      user: [CHIME],
+      env: { ...LEGACY_KEY_ENV, UNIFI_ALLOW_WRITES: "1" },
+    });
+    expect(String(lastPort(writable.res).powerCycle)).not.toMatch(/UNIFI_ALLOW_WRITES/);
+  });
+
+  it("does not name a tool the console is too old to have", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = decodeURIComponent(String(url));
+      if (u.includes("/rest/user")) return rcOk([CHIME]);
+      if (u.includes("/stat/sta")) return rcOk([]);
+      if (u.includes(`/devices/${SWITCH_ID}`))
+        return jsonResponse({ interfaces: { ports: PORTS } });
+      if (u.includes("/devices")) return jsonResponse(page([{ id: SWITCH_ID }]));
+      return jsonResponse(page(SITES));
+    });
+    const server = await connect({
+      env: LEGACY_KEY_ENV,
+      fetchImpl: fetchMock,
+      probe: probeFor("9.0.114"),
+    });
+    const res = await server.call("unifi_diagnose_client", { device: "Chime" });
+    const port = lastPort(res);
+    expect(port).not.toHaveProperty("powerCycle");
+    expect(String(port.note)).toMatch(/9\.3/);
+  });
+
+  it("does not offer a power cycle on a port without PoE", async () => {
+    const { res } = await serve({ user: [{ ...CHIME, last_uplink_remote_port: 1 }] });
+    const port = lastPort(res);
+    expect(port.portIdx).toBe(1);
+    expect(port.poe).toBeNull();
+    expect(port).not.toHaveProperty("powerCycle");
+    expect(String(port.note)).toMatch(/no PoE/i);
+  });
+
+  // An unmanaged switch, or one adopted by another console: the roster still
+  // knows the port, which is worth reporting even without a way to cycle it.
+  it("still reports the port when the switch is not one this console manages", async () => {
+    const { res } = await serve({ user: [CHIME], switchFound: false });
+    const port = lastPort(res);
+    expect(port).toMatchObject({ switchName: "Switch Cellar", switchMac: SWITCH_MAC, portIdx: 8 });
+    expect(port).not.toHaveProperty("powerCycle");
+  });
+
+  it("leaves a wireless client alone", async () => {
+    const { res, urls } = await serve({
+      user: [{ mac: "b8:82:f2:c5:8b:38", name: "Chime", last_uplink_name: "AP Attic" }],
+    });
+    expect(first(res)).not.toHaveProperty("lastPort");
+    expect(urls.some((u) => u.includes("/devices"))).toBe(false);
   });
 });
 
