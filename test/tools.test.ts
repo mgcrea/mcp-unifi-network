@@ -401,6 +401,164 @@ describe("unifi_legacy_list_known_clients", () => {
   });
 });
 
+// UniFi Network 11 carries `blocked` on every roster record, so its presence
+// says nothing about the past. Reporting it anyway claimed all 292 known
+// clients on a live console had been blocked at some point.
+describe("unifi_legacy_list_known_clients on a roster that always carries `blocked`", () => {
+  const KNOWN = [
+    { mac: "aa:aa:aa:aa:aa:01", name: "Mower", blocked: false, last_seen: 1_780_000_000 },
+    { mac: "aa:aa:aa:aa:aa:02", name: "Laptop", blocked: true, last_seen: 1_780_000_000 },
+  ];
+  const call = async (args: Record<string, unknown> = {}) =>
+    (await legacyServer({ user: KNOWN })).call("unifi_legacy_list_known_clients", args);
+
+  it("reports no ever-blocked count rather than a wrong one", async () => {
+    const res = await call();
+    expect(res.blockedCount).toBe(1);
+    expect(res.everBlockedCount).toBeNull();
+    expect(JSON.stringify(res.data)).not.toContain("wasEverBlocked");
+  });
+
+  it("says why it cannot filter on everBlocked", async () => {
+    const res = await call({ blocked: "everBlocked" });
+    expect(res.isToolError).toBe(true);
+    expect(String(res.error)).toContain("reports `blocked` on every known client");
+  });
+
+  it("keeps diagnose_client from claiming a past block", async () => {
+    const res = await (
+      await legacyServer({ user: KNOWN })
+    ).call("unifi_diagnose_client", {
+      device: "mower",
+    });
+    expect(JSON.stringify(res)).not.toContain("wasEverBlocked");
+  });
+});
+
+describe("unifi_legacy_list_alarms", () => {
+  const CRITICAL = {
+    id: "c1",
+    event: "DEVICE_DISCONNECTED",
+    title_raw: "Device Offline",
+    severity: "HIGH",
+    message_raw: "{DEVICE} is offline.",
+    parameters: { DEVICE: { name: "AP Attic" } },
+    timestamp: 1_791_527_721_561,
+  };
+
+  const serve = async (opts: { systemLog: boolean }) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/system-log/")) {
+        return opts.systemLog
+          ? jsonResponse([CRITICAL])
+          : new Response("Not Found", { status: 404 });
+      }
+      if (u.includes("/stat/alarm")) {
+        return jsonResponse({ meta: { rc: "ok" }, data: [{ _id: "a1", key: "EVT_AP_Lost" }] });
+      }
+      return jsonResponse(page(SITES));
+    });
+    return { server: await connect({ env: LEGACY_KEY_ENV, fetchImpl: fetchMock }), fetchMock };
+  };
+
+  // Network 9+ answers 404 on stat/alarm, which made this tool fail outright
+  // on current consoles. Alarms live in the system log's critical category.
+  it("reads the system log's critical entries on a current console", async () => {
+    const { server, fetchMock } = await serve({ systemLog: true });
+    const res = await server.call("unifi_legacy_list_alarms", {});
+    expect(res.isToolError).toBe(false);
+    expect(res.source).toBe("system-log/critical");
+    expect(res.data).toEqual([expect.objectContaining({ message: "AP Attic is offline." })]);
+    const [url, init] =
+      fetchMock.mock.calls.find(([u]) => String(u).includes("/system-log/")) ?? [];
+    expect(String(url)).toContain("/v2/api/site/default/system-log/critical");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("falls back to stat/alarm on a console without the system log", async () => {
+    const { server } = await serve({ systemLog: false });
+    const res = await server.call("unifi_legacy_list_alarms", {});
+    expect(res.isToolError).toBe(false);
+    expect(res.source).toBe("stat/alarm");
+    expect(res.data).toEqual([expect.objectContaining({ _id: "a1" })]);
+  });
+});
+
+describe("secrets and size in the escape hatches", () => {
+  const WLAN = { name: "Home", x_passphrase: "hunter22", wlan_bands: ["2g", "5g"] };
+  const DEVICE = {
+    name: "AP Salon",
+    mac: "aa:aa:aa:aa:aa:01",
+    vap_table: [{ big: 1 }],
+    x_authkey: "k",
+  };
+
+  const serve = async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/rest/wlanconf")) return jsonResponse({ meta: { rc: "ok" }, data: [WLAN] });
+      if (u.includes("/stat/device")) return jsonResponse({ meta: { rc: "ok" }, data: [DEVICE] });
+      if (u.includes("/wifi/broadcasts/")) {
+        return jsonResponse({ name: "Home", securityConfiguration: { passphrase: "hunter22" } });
+      }
+      return jsonResponse(page(SITES));
+    });
+    const server = await connect({
+      env: { ...LEGACY_KEY_ENV, UNIFI_ALLOW_WRITES: "1" },
+      fetchImpl: fetchMock,
+    });
+    return { server, fetchMock };
+  };
+
+  it("masks passphrases from either API unless asked to reveal them", async () => {
+    const { server } = await serve();
+    const legacy = await server.call("unifi_legacy_request", {
+      path: "/api/s/default/rest/wlanconf",
+    });
+    expect(JSON.stringify(legacy)).not.toContain("hunter22");
+    expect(JSON.stringify(legacy)).toContain("[redacted]");
+
+    const official = await server.call("unifi_request", {
+      path: `/sites/${SITE_UUID}/wifi/broadcasts/x`,
+    });
+    expect(JSON.stringify(official)).not.toContain("hunter22");
+
+    const revealed = await server.call("unifi_legacy_request", {
+      path: "/api/s/default/rest/wlanconf",
+      revealSecrets: true,
+    });
+    expect(JSON.stringify(revealed)).toContain("hunter22");
+  });
+
+  it("refuses to write a masked secret back, without reaching the network", async () => {
+    const { server, fetchMock } = await serve();
+    const before = fetchMock.mock.calls.length;
+    const res = await server.call("unifi_legacy_request", {
+      method: "PUT",
+      path: "/api/s/default/rest/wlanconf/1",
+      body: { ...WLAN, x_passphrase: "[redacted]" },
+      confirm: true,
+    });
+    expect(res.isToolError).toBe(true);
+    expect(String(res.error)).toContain("masked when it was read");
+    expect(fetchMock.mock.calls.slice(before).some(([u]) => String(u).includes("wlanconf"))).toBe(
+      false,
+    );
+  });
+
+  // `attrs` is advisory: Network 11 ignores it on stat/sta and stat/device and
+  // sends 125-245 KB. `fields` is applied here, so it always holds.
+  it("projects each record to the requested fields", async () => {
+    const { server } = await serve();
+    const res = await server.call("unifi_legacy_request", {
+      path: "/api/s/default/stat/device",
+      fields: ["name", "mac", "missing"],
+    });
+    expect(res["0"]).toEqual({ name: "AP Salon", mac: "aa:aa:aa:aa:aa:01" });
+  });
+});
+
 const LEGACY_KEY_ENV = { ...READY_ENV, UNIFI_ENABLE_LEGACY: "1" };
 
 describe("unifi_legacy_list_events", () => {

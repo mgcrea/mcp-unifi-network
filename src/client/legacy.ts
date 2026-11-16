@@ -56,7 +56,13 @@ const LEGACY_REMEDIES: Record<string, string> = {
   "api.err.NoPermission":
     "This console account lacks permission for that operation. The legacy API uses the admin's " +
     "own role, so a read-only admin cannot run cmd/* endpoints.",
-  "api.err.InvalidPayload": "The controller could not parse the request body as JSON.",
+  // Not a JSON syntax error, despite the name: well-formed JSON with a value the
+  // endpoint refuses (an unknown scheduletask `action` gets exactly this) is
+  // reported the same way, and the old wording sent people hunting for a typo.
+  "api.err.InvalidPayload":
+    "The controller rejected the request body: a field is missing, misspelled, or holds a value " +
+    "this endpoint does not accept. It does not say which, so compare against an object of the " +
+    "same kind read back from the controller.",
   "api.err.Ubic2faTokenRequired":
     "This account has two-factor authentication enabled, which cannot be scripted. Create a " +
     "dedicated LOCAL console admin without 2FA and without cloud access, and use that instead.",

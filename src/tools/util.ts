@@ -58,14 +58,76 @@ export const toFailure = (err: unknown): ToolResult => {
   return fail("Unknown error", err);
 };
 
-/** Run a tool body, JSON-formatting the result and turning throws into tool errors. */
-export const wrap = async <T>(fn: () => Promise<T>): Promise<ToolResult> => {
+/** What a secret is replaced with. A write carrying it back is refused, see below. */
+export const REDACTED = "[redacted]";
+
+/**
+ * Field names whose string values are credentials. Both APIs hand them out to
+ * any reader: the legacy `rest/wlanconf` returns every SSID's `x_passphrase`
+ * (the controller's `x_` prefix marks its stored secrets — `x_iapp_key`,
+ * `x_authkey`, `x_vwirekey`), and the Integration API's single-broadcast GET
+ * returns `securityConfiguration.passphrase`. Tool results end up in
+ * transcripts, logs and prompt caches, so they leave this process masked.
+ * Only string values are masked: `x_aes_gcm: true` is a capability flag.
+ */
+const SECRET_KEY =
+  /^x_|^(passphrase|password|passwd|psk|pre_?shared_?key|shared_?secret|secret|private_?key)$/i;
+
+/** Deep copy of `value` with every credential string replaced by {@link REDACTED}. */
+export const redactSecrets = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, v]) => [
+      key,
+      SECRET_KEY.test(key) && typeof v === "string" && v !== "" ? REDACTED : redactSecrets(v),
+    ]),
+  );
+};
+
+const carriesRedacted = (value: unknown): boolean =>
+  value === REDACTED ||
+  (typeof value === "object" && value !== null && Object.values(value).some(carriesRedacted));
+
+/**
+ * The trap redaction opens: read a WLAN, change one field, write it back — and
+ * the passphrase is now literally `[redacted]`, taking every client offline.
+ * A write body still carrying the marker is refused rather than sent.
+ */
+export const assertNoRedactedSecrets = (body: unknown): void => {
+  if (carriesRedacted(body)) {
+    throw new Error(
+      `The request body contains "${REDACTED}" — a secret masked when it was read. Sending it ` +
+        "would set that credential to the literal text. Drop the field from the body — the " +
+        "legacy rest/* endpoints leave an omitted field as it is — or, where the endpoint needs " +
+        "the whole object, re-read with `revealSecrets: true` and send the real value.",
+    );
+  }
+};
+
+/**
+ * Run a tool body, JSON-formatting the result and turning throws into tool
+ * errors. Secrets are masked unless the tool explicitly opts out.
+ */
+export const wrap = async <T>(
+  fn: () => Promise<T>,
+  opts: { revealSecrets?: boolean } = {},
+): Promise<ToolResult> => {
   try {
-    return ok(await fn());
+    const data = await fn();
+    return ok(opts.revealSecrets === true ? data : redactSecrets(data));
   } catch (err) {
     return toFailure(err);
   }
 };
+
+export const revealSecretsArg = z
+  .boolean()
+  .default(false)
+  .describe(
+    "Return passphrases and keys in clear instead of masked as `[redacted]`. Only when the user " +
+      "has explicitly asked to see or work with the real value — results land in transcripts.",
+  );
 
 /** Drop undefined values so we never send `{"filter": undefined}` upstream. */
 export const compact = <T extends Record<string, unknown>>(obj: T): Partial<T> =>

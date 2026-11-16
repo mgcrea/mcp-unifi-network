@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
-import { summarizeKnownClient } from "#/client/legacy-shape";
+import { rosterRecordsPastBlocks, summarizeKnownClient } from "#/client/legacy-shape";
 import { eq } from "#/filter";
 import { normalizeMac } from "#/mac";
 import type { ToolContext } from "#/tools/index";
@@ -99,8 +99,15 @@ export const registerDiagnoseTool = (
             .filter((m): m is string => typeof m === "string"),
         );
         const now = Date.now();
-        const rows = (Array.isArray(roster) ? roster : []).map((r) =>
-          summarizeKnownClient(r, now, connected.has(String((r as { mac?: unknown }).mac ?? ""))),
+        const rosterRows = Array.isArray(roster) ? roster : [];
+        const recordsPastBlocks = rosterRecordsPastBlocks(rosterRows);
+        const rows = rosterRows.map((r) =>
+          summarizeKnownClient(
+            r,
+            now,
+            connected.has(String((r as { mac?: unknown }).mac ?? "")),
+            recordsPastBlocks,
+          ),
         );
 
         // A MAC typed in any of the four common spellings must match the

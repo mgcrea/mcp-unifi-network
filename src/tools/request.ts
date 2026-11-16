@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { WritesDisabledError } from "#/client/errors";
 import type { ToolContext } from "#/tools/index";
-import { compact, wrap } from "#/tools/util";
+import { assertNoRedactedSecrets, compact, revealSecretsArg, wrap } from "#/tools/util";
 
 /**
  * Reject anything that could leave this API, or climb out of it. An absolute
@@ -71,21 +71,26 @@ export const registerRequestTool = (server: McpServer, ctx: ToolContext): void =
           .unknown()
           .optional()
           .describe("JSON request body, for POST, PUT and PATCH. Sent verbatim."),
+        revealSecrets: revealSecretsArg,
       }),
       annotations: { readOnlyHint: !allowWrites, destructiveHint: allowWrites },
     },
-    async ({ method, path, query, body }) =>
-      wrap(async () => {
-        // Belt and braces: the enum already excludes writes, but a client could
-        // hand-roll a request that skips schema validation.
-        if (!allowWrites && method !== "GET") {
-          throw new WritesDisabledError(`unifi_request with method ${method}`);
-        }
-        assertSafePath(path);
-        return client.request(method, path, {
-          ...(query ? { query: compact(query) } : {}),
-          ...(body !== undefined ? { body } : {}),
-        });
-      }),
+    async ({ method, path, query, body, revealSecrets }) =>
+      wrap(
+        async () => {
+          // Belt and braces: the enum already excludes writes, but a client could
+          // hand-roll a request that skips schema validation.
+          if (!allowWrites && method !== "GET") {
+            throw new WritesDisabledError(`unifi_request with method ${method}`);
+          }
+          assertSafePath(path);
+          if (body !== undefined) assertNoRedactedSecrets(body);
+          return client.request(method, path, {
+            ...(query ? { query: compact(query) } : {}),
+            ...(body !== undefined ? { body } : {}),
+          });
+        },
+        { revealSecrets },
+      ),
   );
 };

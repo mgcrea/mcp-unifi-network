@@ -166,11 +166,16 @@ export const summarizeSystemLogEvent = (event: unknown): unknown => {
  *
  * Two traps, both of which have produced a wrong answer here already:
  *
- *  1. **`blocked` is omitted when false.** Only a client that has been blocked
- *     at some point carries the key at all, so `blocked === false` and "key
- *     absent" mean different things — the first is a device someone unblocked,
- *     the second a device never touched. `wasEverBlocked` preserves that, since
- *     it is the interesting signal when the question is "did I do this?".
+ *  1. **`blocked` is omitted when false — on some consoles.** Where only a
+ *     client that has been blocked at some point carries the key at all,
+ *     `blocked === false` and "key absent" mean different things: the first is
+ *     a device someone unblocked, the second a device never touched.
+ *     `wasEverBlocked` preserves that, since it is the interesting signal when
+ *     the question is "did I do this?". UniFi Network 11 writes `blocked: false`
+ *     on EVERY record (292 of 292 on a live console), which erases the
+ *     distinction — read naively, every device ever seen "was blocked once".
+ *     So the signal is only trusted on a roster where some records lack the key;
+ *     see {@link rosterRecordsPastBlocks}.
  *  2. **Timestamps are seconds, not milliseconds.** `new Date(last_seen)` gives
  *     January 1970 and looks plausible enough to ship.
  *  3. **`last_seen` is the last ASSOCIATION, not the last activity.** It does
@@ -190,20 +195,27 @@ const iso = (value: unknown): string | undefined => {
   return s === undefined ? undefined : new Date(s * 1000).toISOString();
 };
 
+/**
+ * Whether this roster's `blocked` key can tell a once-blocked client from a
+ * never-blocked one. Only when the console omits it on some records — a roster
+ * that carries it everywhere records the current state and nothing more.
+ */
+export const rosterRecordsPastBlocks = (roster: readonly unknown[]): boolean =>
+  roster.some((row) => isRecord(row) && !("blocked" in row));
+
 export const summarizeKnownClient = (
   client: unknown,
   now = Date.now(),
   connectedNow = false,
+  recordsPastBlocks = true,
 ): Rec => {
   if (!isRecord(client)) return { raw: client };
   const lastSeen = seconds(client.last_seen);
 
-  const out: Rec = {
-    mac: client.mac,
-    blocked: client.blocked === true,
-    // Distinguishes "unblocked at some point" from "never blocked" — see above.
-    wasEverBlocked: "blocked" in client,
-  };
+  const out: Rec = { mac: client.mac, blocked: client.blocked === true };
+  // Distinguishes "unblocked at some point" from "never blocked" — see above.
+  // Left out entirely where the roster cannot say, rather than guessed.
+  if (recordsPastBlocks) out.wasEverBlocked = "blocked" in client;
   const name = client.name ?? client.hostname;
   if (name) out.name = name;
   if (client.oui) out.oui = client.oui;

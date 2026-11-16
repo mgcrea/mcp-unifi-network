@@ -4,6 +4,7 @@ import { z } from "zod";
 import { UnifiLegacyError, WritesDisabledError } from "#/client/errors";
 import type { UnifiLegacyClient } from "#/client/legacy";
 import {
+  rosterRecordsPastBlocks,
   summarizeKnownClient,
   summarizeLegacyEvent,
   summarizeSystemLogEvent,
@@ -11,7 +12,15 @@ import {
 import { normalizeMac } from "#/mac";
 import type { ToolContext } from "#/tools/index";
 import { assertSafePath } from "#/tools/request";
-import { compact, confirmArg, macArg, siteArg, wrap } from "#/tools/util";
+import {
+  assertNoRedactedSecrets,
+  compact,
+  confirmArg,
+  macArg,
+  revealSecretsArg,
+  siteArg,
+  wrap,
+} from "#/tools/util";
 
 const withinArg = z
   .number()
@@ -158,25 +167,67 @@ export const registerLegacyTools = (
       title: "UniFi: Legacy List Alarms",
       description:
         "List the site's alarms — the events the controller considers actionable, such as a " +
-        "device going down or a rogue access point appearing. Unarchived alarms are the ones " +
-        "still demanding attention.",
+        "device going down or a rogue access point appearing. On UniFi Network 9 and later " +
+        "these are the system log's Critical entries; older consoles keep a separate alarm " +
+        "list, where unarchived alarms are the ones still demanding attention. An empty " +
+        "result is not a health check: a radio can stop serving clients without raising one.",
       inputSchema: z.object({
         site: siteArg,
+        within: z
+          .number()
+          .int()
+          .min(1)
+          .max(8760)
+          .default(720)
+          .describe(
+            "How many hours back to look on a system-log console. Defaults to 720 (30 days). " +
+              "Older consoles return their alarm list regardless.",
+          ),
         archived: z
           .boolean()
           .default(false)
-          .describe("True to include archived alarms. Defaults to false — the open ones only."),
+          .describe(
+            "True to include archived alarms. Defaults to false — the open ones only. Only " +
+              "older consoles archive alarms; the system log has no such state.",
+          ),
         limit: legacyLimitArg,
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ site, archived, limit }) =>
+    async ({ site, within, archived, limit }) =>
       wrap(async () => {
+        // Network 9+ answers 404 on `stat/alarm`: alarms moved into the v2
+        // system log as its `critical` category. Same pattern as the events
+        // tool — ask for the new one, fall back only on a console without it.
+        try {
+          const now = Date.now();
+          const data = await legacy.request<unknown[]>(
+            "POST",
+            `/v2/api/site/${encodeURIComponent(await ctx.sites.resolveLegacyName(site))}/system-log/critical`,
+            {
+              body: {
+                timestampFrom: now - within * 3_600_000,
+                timestampTo: now,
+                pageNumber: 0,
+                pageSize: limit,
+              },
+            },
+          );
+          const rows = Array.isArray(data) ? data : [];
+          return {
+            data: rows.map(summarizeSystemLogEvent),
+            count: rows.length,
+            source: "system-log/critical",
+          };
+        } catch (err) {
+          if (!(err instanceof UnifiLegacyError && err.status === 404)) throw err;
+        }
+
         const data = await legacy.request<unknown[]>("GET", await sitePath(site, "/stat/alarm"), {
           query: compact({ archived: archived ? undefined : false, _limit: limit, _sort: "-time" }),
         });
         const rows = Array.isArray(data) ? data : [];
-        return { data: rows.map(summarizeLegacyEvent), count: rows.length };
+        return { data: rows.map(summarizeLegacyEvent), count: rows.length, source: "stat/alarm" };
       }),
   );
 
@@ -200,8 +251,9 @@ export const registerLegacyTools = (
           .default("any")
           .describe(
             'Which clients to return. "only" is those blocked right now. "everBlocked" also ' +
-              "includes clients that were blocked and later unblocked — the controller keeps " +
-              'that mark, and it is what answers "did I block this by accident once?". ' +
+              "includes clients that were blocked and later unblocked — older controllers keep " +
+              'that mark, and it is what answers "did I block this by accident once?". UniFi ' +
+              "Network 11 does not, and refuses it with an explanation. " +
               'Defaults to "any".',
           ),
         search: z
@@ -281,11 +333,22 @@ export const registerLegacyTools = (
             .filter((m): m is string => typeof m === "string"),
         );
         const now = Date.now();
-        const rows = (Array.isArray(data) ? data : []).map((row) =>
+        const roster = Array.isArray(data) ? data : [];
+        const recordsPastBlocks = rosterRecordsPastBlocks(roster);
+        if (blocked === "everBlocked" && !recordsPastBlocks) {
+          throw new Error(
+            'This console cannot answer "everBlocked": it reports `blocked` on every known ' +
+              "client (UniFi Network 11 does), so a past block leaves no trace in the roster. " +
+              'Use `blocked: "only"` for what is blocked now, or unifi_legacy_list_events with ' +
+              "the client to look for a block in the event history.",
+          );
+        }
+        const rows = roster.map((row) =>
           summarizeKnownClient(
             row,
             now,
             connected.has(String((row as { mac?: unknown }).mac ?? "")),
+            recordsPastBlocks,
           ),
         );
 
@@ -293,7 +356,11 @@ export const registerLegacyTools = (
         // a `blockedCount` that moved with the filters would make an empty
         // filtered result read as "nothing is blocked".
         const blockedCount = rows.filter((row) => row.blocked === true).length;
-        const everBlockedCount = rows.filter((row) => row.wasEverBlocked === true).length;
+        // null, not a count, where the roster cannot tell — a number here would
+        // read as "every device you own was blocked once".
+        const everBlockedCount = recordsPastBlocks
+          ? rows.filter((row) => row.wasEverBlocked === true).length
+          : null;
 
         const needle = search?.toLowerCase();
         const matched = rows.filter((row) => {
@@ -439,7 +506,9 @@ export const registerLegacyRequestTool = (
         "Paths are absolute controller paths and the site segment is the 8-character " +
         "`internalReference`, NOT the UUID — `unifi_list_sites` shows both. " +
         "This API answers errors with HTTP 200 and a `meta.rc` of `error`; that is unwrapped for " +
-        "you. Responses can be very large, so pass `attrs` or `_limit` in the query. " +
+        "you. Responses can be very large: pass `fields` to keep only the keys you need — " +
+        "`attrs` in the query is advisory, and current consoles ignore it on `stat/sta` and " +
+        "`stat/device`. Passphrases and keys come back masked unless `revealSecrets` is set. " +
         (allowWrites
           ? "Writes are ENABLED and every non-GET call requires `confirm: true`, because the " +
             "cmd/* endpoints here are the irreversible ones."
@@ -457,9 +526,19 @@ export const registerLegacyRequestTool = (
           .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
           .optional()
           .describe(
-            "Query parameters. `attrs` restricts the fields the controller builds and is the " +
-              "best way to keep a response small; `_limit`, `_start` and `_sort` are honoured on " +
+            "Query parameters. `attrs` asks the controller to build fewer fields, but it is " +
+              "advisory — current consoles ignore it on `stat/sta` and `stat/device` — so use " +
+              "`fields` for a guaranteed cut. `_limit`, `_start` and `_sort` are honoured on " +
               "most list endpoints and silently ignored on the rest.",
+          ),
+        fields: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe(
+            "Top-level keys to keep on each returned record, applied here after the response " +
+              'arrives, so it always works. E.g. `["name","mac","radio_table_stats"]` on ' +
+              "`stat/device` turns ~240 KB into a few. Keys a record lacks are skipped.",
           ),
         body: z.unknown().optional().describe("JSON request body, for POST and PUT."),
         confirm: z
@@ -469,25 +548,41 @@ export const registerLegacyRequestTool = (
             "Required for any method other than GET. Explicit acknowledgement that this changes " +
               "live network state through an undocumented endpoint with no dry run.",
           ),
+        revealSecrets: revealSecretsArg,
       }),
       annotations: { readOnlyHint: !allowWrites, destructiveHint: allowWrites },
     },
-    async ({ method, path, query, body, confirm }) =>
-      wrap(async () => {
-        if (!allowWrites && method !== "GET") {
-          throw new WritesDisabledError(`unifi_legacy_request with method ${method}`);
-        }
-        if (method !== "GET" && confirm !== true) {
-          throw new Error(
-            `unifi_legacy_request with method ${method} requires \`confirm: true\`. The legacy ` +
-              `cmd/* endpoints are irreversible and have no dry run.`,
-          );
-        }
-        assertSafePath(path);
-        return legacy.request(method, path, {
-          ...(query ? { query: compact(query) } : {}),
-          ...(body !== undefined ? { body } : {}),
-        });
-      }),
+    async ({ method, path, query, body, confirm, fields, revealSecrets }) =>
+      wrap(
+        async () => {
+          if (!allowWrites && method !== "GET") {
+            throw new WritesDisabledError(`unifi_legacy_request with method ${method}`);
+          }
+          if (method !== "GET" && confirm !== true) {
+            throw new Error(
+              `unifi_legacy_request with method ${method} requires \`confirm: true\`. The legacy ` +
+                `cmd/* endpoints are irreversible and have no dry run.`,
+            );
+          }
+          assertSafePath(path);
+          if (body !== undefined) assertNoRedactedSecrets(body);
+          const data = await legacy.request(method, path, {
+            ...(query ? { query: compact(query) } : {}),
+            ...(body !== undefined ? { body } : {}),
+          });
+          return fields ? projectFields(data, fields) : data;
+        },
+        { revealSecrets },
+      ),
   );
+};
+
+/** Keep only `fields` on each record of a list, or on a lone record. */
+const projectFields = (data: unknown, fields: readonly string[]): unknown => {
+  const project = (row: unknown): unknown => {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) return row;
+    const source = row as Record<string, unknown>;
+    return Object.fromEntries(fields.filter((key) => key in source).map((k) => [k, source[k]]));
+  };
+  return Array.isArray(data) ? data.map(project) : project(data);
 };

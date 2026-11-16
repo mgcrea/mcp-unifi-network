@@ -41,6 +41,14 @@ from the environment or from `~/.config/unifi/config.json`, which is warned abou
 group-readable. The legacy session cookie is a full console-admin credential and is held **in
 memory only** — never written to disk. Nothing is sent anywhere but your console.
 
+**The console's secrets.** Both APIs hand Wi-Fi passphrases to any reader — the legacy
+`rest/wlanconf` as `x_passphrase` (alongside `x_iapp_key` and friends), the Integration API's
+single-broadcast GET as `securityConfiguration.passphrase`. Every tool result is masked to
+`[redacted]` on the way out, because results land in transcripts, logs and prompt caches. The two
+escape hatches take `revealSecrets: true` for when you actually asked for the password, and
+refuse a write body that still carries `[redacted]`, which would otherwise set the passphrase to
+that literal text.
+
 **Configuration never kills the server.** A contradictory setting is resolved to the safe option
 and reported through the startup banner and `unifi_auth_status`, rather than throwing — a server
 that exits at startup appears in the client as a bare `Connection closed` with stderr swallowed,
@@ -268,8 +276,14 @@ All of these are baked into the tool descriptions, but they explain the shape of
    healthy the status line looks. That is unwrapped for you in one place.
 9. **Legacy payloads are enormous** — a `stat/device` object declares ~423 fields and one UDM-Pro
    is 50–150 KB. Legacy responses are projected down, and `unifi_legacy_request` refuses anything
-   over 5 MB rather than parsing it. Pass `attrs` and `_limit`.
-10. **Login is rate-limited.** The legacy session is established once per server start and reused;
+   over 5 MB rather than parsing it. `attrs` is advisory: Network 11 ignores it on `stat/sta` and
+   `stat/device` and sends 125–245 KB anyway, so pass `fields` to `unifi_legacy_request` instead —
+   it is applied here and always holds.
+10. **`blocked` stopped meaning what it used to.** Older consoles omit the key on a client that was
+    never blocked, so its presence recorded a past block. Network 11 writes `blocked: false` on
+    every record, which makes every device ever seen look once-blocked. `wasEverBlocked` is only
+    reported where the roster can still tell, and `everBlockedCount` is `null` where it cannot.
+11. **Login is rate-limited.** The legacy session is established once per server start and reused;
     a 429 on login is never retried, because retrying deepens the lockout.
 
 ## Troubleshooting
