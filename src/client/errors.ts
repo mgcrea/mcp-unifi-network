@@ -91,3 +91,18 @@ export class ResponseTooLargeError extends Error {
     );
   }
 }
+
+/**
+ * The Network 11 statistics engine cannot answer here. `reason` lets the
+ * enriching tools degrade to a note rather than fail: history is an extra, and
+ * a View Only key or a 10.x console must not cost the rest of a health check.
+ */
+export class StatsUnavailableError extends Error {
+  override readonly name = "StatsUnavailableError";
+  readonly reason: "forbidden" | "absent" | "legacy";
+
+  constructor(reason: "forbidden" | "absent" | "legacy", message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}

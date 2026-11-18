@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { SiteResolutionError, StatsUnavailableError } from "#/client/errors";
+import { UnifiLegacyClient } from "#/client/legacy";
+import { buildFilter, StatsEngine } from "#/client/stats";
 import { BUCKET_MS, rollup, ruleFor } from "#/client/stats-rollup";
 import type { StatPoint } from "#/client/stats-rollup";
 
@@ -124,5 +127,148 @@ describe("rollup", () => {
       3_600_000,
     );
     expect(out.map((p) => p.rxBytes)).toEqual([1, 2]);
+  });
+});
+
+const SITE_ID = "6606f482-fa87-4302-b6c6-7ea5b78781a8";
+
+const SCHEMAS = [
+  {
+    name: "wanBySite",
+    keys: ["siteId"],
+    values: ["rxBytes", "txBytes", "avgAvailabilityPct", "avgLatencyMs", "failoverS"],
+    nested: [{ name: "byNetworkGroup", keys: ["networkGroup"], values: ["rxBytes"], nested: null }],
+  },
+  {
+    name: "wirelessBySiteByDevice",
+    keys: ["siteId", "deviceMac"],
+    values: ["distinctClientCount", "rxBytes"],
+    nested: [
+      { name: "byRadioBand", keys: ["radioBand"], values: ["rxBytes", "txBytes"], nested: null },
+    ],
+  },
+  {
+    name: "activityBySiteByClient",
+    keys: ["siteId", "clientId"],
+    values: ["rxBytes", "txBytes", "durationMs", "avgSignalDbm"],
+    nested: null,
+  },
+];
+
+type Route = { status?: number; body: unknown };
+
+/** A StatsEngine over a legacy client whose fetch answers by path. */
+const engineWith = (routes: Record<string, Route>, now = 1_795_028_672_455) => {
+  const fetchMock = vi.fn(async (url: string) => {
+    const path = new URL(String(url)).pathname.replace("/proxy/network", "");
+    const route = routes[path];
+    if (!route) return new Response("{}", { status: 404 });
+    return new Response(JSON.stringify(route.body), {
+      status: route.status ?? 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  const legacy = new UnifiLegacyClient({
+    baseUrl: "https://10.0.0.1/proxy/network",
+    loginUrl: "https://10.0.0.1/api/auth/login",
+    username: "",
+    password: "",
+    apiKey: "test-key",
+    userAgent: "test",
+    maxRetries: 0,
+    fetch: fetchMock as unknown as typeof fetch,
+  });
+  return { engine: new StatsEngine(legacy, { now: () => now }), fetchMock };
+};
+
+const MODERN: Record<string, Route> = {
+  "/v2/api/stats/source": { body: "MODERN" },
+  "/v2/api/stats/schemas": { body: SCHEMAS },
+  "/v2/api/stats/recent/series": { body: [] },
+  "/api/self/sites": { body: { meta: { rc: "ok" }, data: [{ _id: SITE_ID, name: "default" }] } },
+};
+
+describe("StatsEngine", () => {
+  it("composes a site filter with key matches, lowercasing MACs", () => {
+    expect(buildFilter(SITE_ID)).toBe(`siteId.eq('${SITE_ID}')`);
+    expect(buildFilter(SITE_ID, { clientId: "92:B7:C1:1E:52:51" })).toBe(
+      `and(siteId.eq('${SITE_ID}'),clientId.eq('92:b7:c1:1e:52:51'))`,
+    );
+  });
+
+  it("refuses a filter value that could escape the grammar", () => {
+    expect(() => buildFilter(SITE_ID, { clientId: "x') or (1" })).toThrow(/clientId/);
+  });
+
+  it("asks for period and end, never start", async () => {
+    const { engine, fetchMock } = engineWith(MODERN);
+    await engine.series({
+      schema: "wirelessBySiteByDevice",
+      siteId: SITE_ID,
+      period: "DAY",
+      values: ["distinctClientCount"],
+      nested: "byRadioBand",
+    });
+    const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]));
+    expect(url.pathname).toBe("/proxy/network/v2/api/stats/recent/series");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      schema: "wirelessBySiteByDevice",
+      period: "DAY",
+      end: "1795028672455",
+      filter: `siteId.eq('${SITE_ID}')`,
+      projection: "values(distinctClientCount),nested(byRadioBand)",
+    });
+  });
+
+  it("rejects a value the schema does not have, naming the ones it does", async () => {
+    const { engine } = engineWith(MODERN);
+    await expect(
+      engine.series({ schema: "wanBySite", siteId: SITE_ID, period: "DAY", values: ["bogus"] }),
+    ).rejects.toThrow(/avgLatencyMs/);
+  });
+
+  it("rejects an unknown schema, listing the valid ones", async () => {
+    const { engine } = engineWith(MODERN);
+    await expect(engine.schema("wan")).rejects.toThrow(/wanBySite/);
+  });
+
+  it("resolves the site _id once and caches it", async () => {
+    const { engine, fetchMock } = engineWith(MODERN);
+    expect(await engine.siteId("default")).toBe(SITE_ID);
+    expect(await engine.siteId("default")).toBe(SITE_ID);
+    const selfSites = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/self/sites"));
+    expect(selfSites).toHaveLength(1);
+  });
+
+  it("names the sites it knows when one has no _id", async () => {
+    const { engine } = engineWith(MODERN);
+    const err = await engine.siteId("warehouse").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SiteResolutionError);
+    expect(String(err)).toContain(SITE_ID);
+  });
+
+  it("explains a 403 as the account's role", async () => {
+    const { engine } = engineWith({
+      ...MODERN,
+      "/v2/api/stats/source": { status: 403, body: { errorCode: 403, message: "No permission" } },
+    });
+    const err = await engine.source().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StatsUnavailableError);
+    expect((err as StatsUnavailableError).reason).toBe("forbidden");
+    expect(String(err)).toMatch(/Full Admin/);
+  });
+
+  it("explains a 404 as a console that predates the engine", async () => {
+    const { engine } = engineWith({ ...MODERN, "/v2/api/stats/source": { status: 404, body: {} } });
+    const err = await engine.source().catch((e: unknown) => e);
+    expect((err as StatsUnavailableError).reason).toBe("absent");
+  });
+
+  it("refuses series on a LEGACY engine", async () => {
+    const { engine } = engineWith({ ...MODERN, "/v2/api/stats/source": { body: "LEGACY" } });
+    const err = await engine
+      .series({ schema: "wanBySite", siteId: SITE_ID, period: "DAY", values: ["rxBytes"] })
+      .catch((e: unknown) => e);
+    expect((err as StatsUnavailableError).reason).toBe("legacy");
   });
 });
