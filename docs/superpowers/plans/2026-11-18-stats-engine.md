@@ -45,32 +45,34 @@ engine is missing or refuses.
 
 ## File Structure
 
-| File | Responsibility |
-| --- | --- |
-| `src/version.ts` (modify) | add `stats` tier |
-| `src/tools/sites.ts` (modify) | capability text for `stats` |
-| `src/client/probe.ts` (modify) | `ASSUMED_PROBE.tier` → newest |
-| `src/client/stats-rollup.ts` (create) | pure bucket folding and rounding |
-| `src/client/stats.ts` (create) | `StatsEngine`: source, schemas, site `_id`, series, error remedies |
-| `src/client/errors.ts` (modify) | `StatsUnavailableError` |
-| `src/client/stats-detect.ts` (create) | pure detectors: hung radio, WAN findings, client history summary |
-| `src/tools/stats.ts` (create) | `unifi_list_stat_schemas`, `unifi_get_stat_series` |
-| `src/tools/index.ts` (modify) | gate and register the stats tools; pass the engine to health and diagnose |
-| `src/server.ts` (modify) | construct the `StatsEngine` |
-| `src/tools/health.ts`, `src/tools/diagnose.ts` (modify) | enrichment |
-| `test/stats.test.ts` (create) | rollup, engine and detector unit tests |
-| `test/tools.test.ts`, `test/units.test.ts` (modify) | registration matrix, tool behaviour, tiers |
-| `README.md` (modify) | tool rows and pitfalls entry |
+| File                                                    | Responsibility                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `src/version.ts` (modify)                               | add `stats` tier                                                          |
+| `src/tools/sites.ts` (modify)                           | capability text for `stats`                                               |
+| `src/client/probe.ts` (modify)                          | `ASSUMED_PROBE.tier` → newest                                             |
+| `src/client/stats-rollup.ts` (create)                   | pure bucket folding and rounding                                          |
+| `src/client/stats.ts` (create)                          | `StatsEngine`: source, schemas, site `_id`, series, error remedies        |
+| `src/client/errors.ts` (modify)                         | `StatsUnavailableError`                                                   |
+| `src/client/stats-detect.ts` (create)                   | pure detectors: hung radio, WAN findings, client history summary          |
+| `src/tools/stats.ts` (create)                           | `unifi_list_stat_schemas`, `unifi_get_stat_series`                        |
+| `src/tools/index.ts` (modify)                           | gate and register the stats tools; pass the engine to health and diagnose |
+| `src/server.ts` (modify)                                | construct the `StatsEngine`                                               |
+| `src/tools/health.ts`, `src/tools/diagnose.ts` (modify) | enrichment                                                                |
+| `test/stats.test.ts` (create)                           | rollup, engine and detector unit tests                                    |
+| `test/tools.test.ts`, `test/units.test.ts` (modify)     | registration matrix, tool behaviour, tiers                                |
+| `README.md` (modify)                                    | tool rows and pitfalls entry                                              |
 
 ---
 
 ### Task 1: `stats` tier
 
 **Files:**
+
 - Modify: `src/version.ts`, `src/client/probe.ts` (`ASSUMED_PROBE`), `src/tools/sites.ts` (`CAPABILITY_BY_TIER`)
 - Test: `test/units.test.ts` ("version tiers")
 
 **Interfaces:**
+
 - Produces: `TIERS = ["core","clients-plus","network-config","routing","full","stats"]`.
 - Produces: `tierFor("11.0.99") === "stats"` and `tierFor(undefined) === "stats"`.
 - Produces: `floorOf("stats") === "11.0"`.
@@ -95,10 +97,12 @@ engine is missing or refuses.
 ### Task 2: Bucket rollup
 
 **Files:**
+
 - Create: `src/client/stats-rollup.ts`
 - Test: `test/stats.test.ts` (describe "rollup")
 
 **Interfaces:**
+
 - Produces:
   ```ts
   export type StatPoint = { timestamp: number; duration: number } & Record<string, unknown>;
@@ -132,11 +136,13 @@ engine is missing or refuses.
 ### Task 3: StatsEngine client
 
 **Files:**
+
 - Create: `src/client/stats.ts`
 - Modify: `src/client/errors.ts`
 - Test: `test/stats.test.ts` (describe "StatsEngine"). Construct `UnifiLegacyClient` with `apiKey` and a `vi.fn` fetch.
 
 **Interfaces:**
+
 - Consumes: `UnifiLegacyClient.request`.
 - Produces:
   ```ts
@@ -189,11 +195,13 @@ engine is missing or refuses.
 ### Task 4: Generic tools and registration
 
 **Files:**
+
 - Create: `src/tools/stats.ts`
 - Modify: `src/tools/index.ts` (add `stats?: StatsEngine` to `RegisterOptions`), `src/server.ts`, `README.md` (two rows in the legacy table)
 - Test: `test/tools.test.ts`
 
 **Interfaces:**
+
 - Consumes: `StatsEngine` (Task 3), `rollup` and `BUCKET_MS` (Task 2), `normalizeMac`, `siteArg`, `wrap`, and `ctx.sites.resolveLegacyName`.
 - Produces: `registerStatsTools(server, stats: StatsEngine, legacy: UnifiLegacyClient, ctx: ToolContext): void`.
 - Produces: `resolveDeviceMac(legacy, legacyName, input): Promise<{mac: string; name?: string}>`, exported from `src/tools/stats.ts` for reuse by Task 6.
@@ -249,11 +257,13 @@ engine is missing or refuses.
 ### Task 5: Health check — hung radio and WAN
 
 **Files:**
+
 - Create: `src/client/stats-detect.ts`
 - Modify: `src/tools/health.ts`, and `src/tools/index.ts` (pass `opts.stats` only when `atLeast(tier,"stats")`)
 - Test: `test/stats.test.ts` (describe "detectors"), `test/tools.test.ts` ("unifi_health_check")
 
 **Interfaces:**
+
 - Consumes: `SeriesRow`, `StatsEngine`, `BUCKET_MS`.
 - Signature change: `registerHealthTool(server, legacy, ctx, stats?: StatsEngine)`; `registerTools` passes `opts.stats` only when `atLeast(ctx.probe.tier, "stats")`.
 - Produces (pure):
@@ -311,10 +321,12 @@ engine is missing or refuses.
 ### Task 6: Diagnose — client history
 
 **Files:**
+
 - Modify: `src/client/stats-detect.ts`, `src/tools/diagnose.ts`, `src/tools/index.ts` (pass `opts.stats`)
 - Test: `test/stats.test.ts`, `test/tools.test.ts` ("unifi_diagnose_client")
 
 **Interfaces:**
+
 - Produces (pure):
   ```ts
   export type ClientHistory = { rxBytes: number; txBytes: number; avgSignalDbm: number | null; worstHourSignalDbm: number | null;
@@ -349,6 +361,7 @@ engine is missing or refuses.
 ### Task 7: Live verification and docs
 
 **Files:**
+
 - Modify: `README.md` (pitfalls section `## Traps worth knowing`), and `src/tools/stats.ts` (rx/tx wording)
 
 - [ ] **Step 1: Verify the rx/tx direction live, read-only.**

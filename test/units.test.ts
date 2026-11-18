@@ -22,12 +22,14 @@ describe("version tiers", () => {
     expect(tierFor("10.0.162")).toBe("network-config");
     expect(tierFor("10.1.84")).toBe("routing");
     expect(tierFor("10.6.101")).toBe("full");
+    expect(tierFor("11.0.99")).toBe("stats");
+    expect(tierFor("11.1.50")).toBe("stats");
   });
 
   it("assumes the newest tier for an unknown version", () => {
     // Under-registering is invisible; over-registering explains itself.
-    expect(tierFor(undefined)).toBe("full");
-    expect(tierFor("not-a-version")).toBe("full");
+    expect(tierFor(undefined)).toBe("stats");
+    expect(tierFor("not-a-version")).toBe("stats");
   });
 
   it("compares numerically, not as strings", () => {
@@ -43,6 +45,7 @@ describe("version tiers", () => {
     expect(atLeast("core", "network-config")).toBe(false);
     expect(atLeast("clients-plus", "clients-plus")).toBe(true);
     expect(floorOf("network-config")).toBe("10.0");
+    expect(floorOf("stats")).toBe("11.0");
   });
 
   it("names the version a gap needs", () => {

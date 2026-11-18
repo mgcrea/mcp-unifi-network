@@ -4,12 +4,24 @@
 // is an enum comparison and nobody hand-rolls semver in a registration block.
 
 /** Ordered from least to most capable. `atLeast` relies on that order. */
-export const TIERS = ["core", "clients-plus", "network-config", "routing", "full"] as const;
+export const TIERS = [
+  "core",
+  "clients-plus",
+  "network-config",
+  "routing",
+  "full",
+  "stats",
+] as const;
 
 export type VersionTier = (typeof TIERS)[number];
 
+/** The most capable tier, which is what an unknown version is assumed to be. */
+export const NEWEST_TIER: VersionTier = TIERS[TIERS.length - 1] as VersionTier;
+
 /** The minimum `applicationVersion` that unlocks each tier, as [major, minor]. */
 const TIER_FLOOR: [VersionTier, number, number][] = [
+  // 11.0+ — the statistics engine under /v2/api/stats (off-spec, legacy transport).
+  ["stats", 11, 0],
   // 10.3+ — switch stacks, LAG/MC-LAG, VPN, RADIUS, WANs, device tags, DPI tables.
   ["full", 10, 3],
   // 10.1+ — routing additions.
@@ -44,7 +56,7 @@ export const parseVersion = (version: string | undefined): [number, number] | un
  */
 export const tierFor = (version: string | undefined): VersionTier => {
   const parsed = parseVersion(version);
-  if (!parsed) return "full";
+  if (!parsed) return NEWEST_TIER;
   const [major, minor] = parsed;
   for (const [tier, floorMajor, floorMinor] of TIER_FLOOR) {
     if (major > floorMajor || (major === floorMajor && minor >= floorMinor)) return tier;

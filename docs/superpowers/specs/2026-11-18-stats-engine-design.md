@@ -102,13 +102,13 @@ the same as the v2 system-log paths.
 `rollup(points, resolution)` groups points into `raw | hour | day | total` buckets. The rule
 for each metric comes from its name:
 
-| Pattern | Rule |
-| --- | --- |
-| `*Bytes`, `*Packets`, `*Count` (not `distinct*`), `durationMs`, `*S` (seconds) | sum |
-| `avg*`, and `*Pct` without a prefix | mean weighted by bucket `duration` |
-| `max*` / `min*` | max / min |
-| `distinct*` | max (distinct counts are not additive) |
-| `mostCommon*` | mode |
+| Pattern                                                                        | Rule                                   |
+| ------------------------------------------------------------------------------ | -------------------------------------- |
+| `*Bytes`, `*Packets`, `*Count` (not `distinct*`), `durationMs`, `*S` (seconds) | sum                                    |
+| `avg*`, and `*Pct` without a prefix                                            | mean weighted by bucket `duration`     |
+| `max*` / `min*`                                                                | max / min                              |
+| `distinct*`                                                                    | max (distinct counts are not additive) |
+| `mostCommon*`                                                                  | mode                                   |
 
 - Nested group arrays are rolled up the same way, matched on their key fields.
 - The output marks the newest bucket `partial: true` when its duration is short.

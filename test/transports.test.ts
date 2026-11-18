@@ -173,7 +173,7 @@ describe("probeConsole", () => {
     const { probe } = await probeConsole(makeClient(fetchMock), { timeoutMs: 200 });
     expect(probe.unreachable).toContain("ECONNREFUSED");
     expect(probe.versionSource).toBe("assumed");
-    expect(probe.tier).toBe("full");
+    expect(probe.tier).toBe("stats");
   });
 
   it("says a 401 means the key, not the network", async () => {
@@ -184,7 +184,7 @@ describe("probeConsole", () => {
     );
     const { probe } = await probeConsole(makeClient(fetchMock), { timeoutMs: 500 });
     expect(probe.unreachable).toContain("the API key was rejected");
-    expect(probe.tier).toBe("full");
+    expect(probe.tier).toBe("stats");
   });
 
   it("keeps the version even when the site pre-fetch fails", async () => {

@@ -7,7 +7,7 @@ import type { Logger } from "#/client/auth";
 import type { SiteRef } from "#/client/sites";
 import type { Page, UnifiClient } from "#/client/unifi";
 import { INTEGRATION_PATHS } from "#/config";
-import { tierFor } from "#/version";
+import { NEWEST_TIER, tierFor } from "#/version";
 import type { VersionTier } from "#/version";
 
 export type Probe = {
@@ -31,7 +31,7 @@ export type Probe = {
  */
 export const ASSUMED_PROBE: Probe = {
   appVersion: undefined,
-  tier: "full",
+  tier: NEWEST_TIER,
   versionSource: "assumed",
   sites: [],
   pathPrefix: INTEGRATION_PATHS[0],

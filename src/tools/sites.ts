@@ -69,4 +69,5 @@ const CAPABILITY_BY_TIER: Record<string, string> = {
   "network-config": "networks, WiFi broadcasts, firewall zones and policies",
   routing: "routing additions",
   full: "switch stacks, LAG, VPN, RADIUS, WAN interfaces and device tags",
+  stats: "statistics history (WAN, radios, clients, ports) from the Network 11 engine",
 };
