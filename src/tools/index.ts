@@ -86,7 +86,7 @@ export const registerTools = (
     // The engine is reached through the legacy transport, but exists only from
     // Network 11 — on 10.x every path under /v2/api/stats answers 404.
     const stats = opts.stats && atLeast(ctx.probe.tier, "stats") ? opts.stats : undefined;
-    registerDiagnoseTool(server, opts.legacy, ctx);
+    registerDiagnoseTool(server, opts.legacy, ctx, stats);
     registerHealthTool(server, opts.legacy, ctx, stats);
     if (stats) registerStatsTools(server, stats, opts.legacy, ctx);
   }

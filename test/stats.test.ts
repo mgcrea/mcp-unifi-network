@@ -4,7 +4,7 @@ import { SiteResolutionError, StatsUnavailableError } from "#/client/errors";
 import { UnifiLegacyClient } from "#/client/legacy";
 import { buildFilter, StatsEngine } from "#/client/stats";
 import type { SeriesRow } from "#/client/stats";
-import { findHungRadios, summarizeWan } from "#/client/stats-detect";
+import { findHungRadios, summarizeClientHistory, summarizeWan } from "#/client/stats-detect";
 import { BUCKET_MS, rollup, ruleFor } from "#/client/stats-rollup";
 import type { StatPoint } from "#/client/stats-rollup";
 
@@ -360,5 +360,62 @@ describe("summarizeWan", () => {
   it("has nothing to say about an empty window", () => {
     expect(summarizeWan([])).toBeNull();
     expect(summarizeWan([{ siteId: STATS_SITE_ID, series: [] }])).toBeNull();
+  });
+});
+
+describe("summarizeClientHistory", () => {
+  const AP_A = "80:2a:a8:49:ce:f2";
+  const AP_B = "80:2a:a8:c0:27:f4";
+  const activity = (signal: (i: number) => number): SeriesRow[] => [
+    {
+      siteId: STATS_SITE_ID,
+      clientId: "aa:aa:aa:aa:aa:02",
+      series: Array.from({ length: 24 }, (_, i) => ({
+        timestamp: HOUR_START + i * 3_600_000,
+        duration: 3_600_000,
+        rxBytes: 100,
+        txBytes: i === 23 ? 0 : 10,
+        avgSignalDbm: signal(i),
+        avgSatisfactionScore: 90,
+        byDevice: [
+          { deviceMac: AP_A, durationMs: 3 },
+          { deviceMac: AP_B, durationMs: 1 },
+        ],
+      })),
+    },
+  ];
+  const roams: SeriesRow[] = [
+    {
+      siteId: STATS_SITE_ID,
+      clientId: "aa:aa:aa:aa:aa:02",
+      series: [
+        { timestamp: HOUR_START, duration: FIVE_MIN, roamCount: 2 },
+        { timestamp: HOUR_START + FIVE_MIN, duration: FIVE_MIN, roamCount: 3 },
+      ],
+    },
+  ];
+
+  it("summarises a day: traffic, signal, roams and which APs carried it", () => {
+    const h = summarizeClientHistory(
+      activity((i) => (i === 7 ? -80 : -60)),
+      roams,
+      new Map([[AP_A, "UAP-AC-Pro Salon"]]),
+    );
+    expect(h).toMatchObject({
+      rxBytes: 2400,
+      txBytes: 230,
+      worstHourSignalDbm: -80,
+      avgSatisfaction: 90,
+      roams: 5,
+      lastActive: new Date(HOUR_START + 23 * 3_600_000).toISOString(),
+    });
+    expect(h?.aps).toEqual([
+      { mac: AP_A, name: "UAP-AC-Pro Salon", sharePct: 75 },
+      { mac: AP_B, sharePct: 25 },
+    ]);
+  });
+
+  it("has nothing to summarise without activity", () => {
+    expect(summarizeClientHistory([], roams, new Map())).toBeNull();
   });
 });

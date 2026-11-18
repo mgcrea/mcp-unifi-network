@@ -121,3 +121,67 @@ export const summarizeWan = (rows: SeriesRow[]): WanSummary | null => {
     failoverS: num(total.failoverS),
   };
 };
+
+export type ClientHistory = {
+  rxBytes: number;
+  txBytes: number;
+  avgSignalDbm: number | null;
+  /** The weakest hourly average: a single bad hour hides inside a day's mean. */
+  worstHourSignalDbm: number | null;
+  avgSatisfaction: number | null;
+  roams: number;
+  /** The last bucket that moved any bytes, ISO. */
+  lastActive: string | null;
+  /** Which APs carried the client, by share of its connected time. */
+  aps: { mac: string; name?: string; sharePct: number }[];
+};
+
+/**
+ * One client's window from activityBySiteByClient (nested byDevice) and
+ * roamBySiteByClient, or null when the engine recorded nothing for it.
+ */
+export const summarizeClientHistory = (
+  activity: SeriesRow[],
+  roams: SeriesRow[],
+  apNames: Map<string, string>,
+): ClientHistory | null => {
+  const points = activity.flatMap((row) => row.series);
+  if (points.length === 0) return null;
+  const bucketMs = BUCKET_MS.DAY;
+  const total: Rec = rollup(points, "total", bucketMs)[0] ?? {};
+
+  const hourly = rollup(points, "hour", bucketMs)
+    .map((p) => p.avgSignalDbm)
+    .filter((v): v is number => typeof v === "number");
+
+  const active = points
+    .filter((p) => num(p.rxBytes) + num(p.txBytes) > 0)
+    .toSorted((a, b) => a.timestamp - b.timestamp)
+    .at(-1);
+
+  const devices = (Array.isArray(total.byDevice) ? total.byDevice : []) as Rec[];
+  const connected = devices.reduce((a, d) => a + num(d.durationMs), 0);
+  const aps = devices
+    .filter((d) => typeof d.deviceMac === "string")
+    .map((d) => {
+      const mac = String(d.deviceMac).toLowerCase();
+      const name = apNames.get(mac);
+      return {
+        mac,
+        ...(name ? { name } : {}),
+        sharePct: connected > 0 ? Math.round((num(d.durationMs) / connected) * 100) : 0,
+      };
+    })
+    .toSorted((a, b) => b.sharePct - a.sharePct);
+
+  return {
+    rxBytes: num(total.rxBytes),
+    txBytes: num(total.txBytes),
+    avgSignalDbm: orNull(total.avgSignalDbm),
+    worstHourSignalDbm: hourly.length > 0 ? Math.min(...hourly) : null,
+    avgSatisfaction: orNull(total.avgSatisfactionScore),
+    roams: roams.flatMap((row) => row.series).reduce((a, p) => a + num(p.roamCount), 0),
+    lastActive: active ? new Date(active.timestamp).toISOString() : null,
+    aps,
+  };
+};

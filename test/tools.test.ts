@@ -1340,3 +1340,57 @@ describe("unifi_health_check history on Network 11", () => {
     expect((res.summary as Rec).wan24h).toBeUndefined();
   });
 });
+
+/** The first per-device result of a diagnose call. */
+const firstResult = (res: Rec) => (res.results as Rec[])[0] as Rec;
+
+describe("unifi_diagnose_client history on Network 11", () => {
+  const USERS = [
+    { mac: "aa:aa:aa:aa:aa:01", name: "Laptop", blocked: true, last_seen: 1_780_000_000 },
+    { mac: "aa:aa:aa:aa:aa:02", name: "Fridge", last_seen: 1_780_000_000 },
+  ];
+  const ACTIVITY = [
+    {
+      siteId: STATS_SITE_ID,
+      clientId: "aa:aa:aa:aa:aa:02",
+      series: statPoints(12, () => ({ rxBytes: 50, txBytes: 5, avgSignalDbm: -61 })),
+    },
+  ];
+
+  const diagnose = async (device: string, stats: StatsFixture, probe = probeFor("11.0.99")) => {
+    const server = await legacyServer({ user: USERS }, { probe, stats });
+    return { server, res: await server.call("unifi_diagnose_client", { device }) };
+  };
+
+  it("adds the last 24 h for a known device", async () => {
+    const { res, server } = await diagnose("Fridge", {
+      series: { activityBySiteByClient: ACTIVITY },
+    });
+    expect(firstResult(res).history24h).toMatchObject({ rxBytes: 600, avgSignalDbm: -61 });
+    const series = server.urls().find((u) => u.includes("activityBySiteByClient")) ?? "";
+    expect(decodeURIComponent(series)).toContain("clientId.eq('aa:aa:aa:aa:aa:02')");
+  });
+
+  it("says why history is missing instead of failing the diagnosis", async () => {
+    const { res } = await diagnose("Fridge", { status: 403 });
+    expect(res.isToolError).toBe(false);
+    expect(String((firstResult(res).history24h as Rec).unavailable)).toMatch(/Full Admin/);
+  });
+
+  it("gives a blocked device no history", async () => {
+    const { res } = await diagnose("Laptop", { series: { activityBySiteByClient: ACTIVITY } });
+    expect(firstResult(res).verdict).toBe("blocked");
+    expect(firstResult(res).history24h).toBeUndefined();
+  });
+
+  it("marks an empty day as empty", async () => {
+    const { res } = await diagnose("Fridge", { series: {} });
+    expect(firstResult(res).history24h).toEqual({ empty: true });
+  });
+
+  it("does not touch the engine below Network 11", async () => {
+    const { res, server } = await diagnose("Fridge", { series: {} }, probeFor("10.6.101"));
+    expect(firstResult(res).history24h).toBeUndefined();
+    expect(server.urls().filter((u) => u.includes("/v2/api/stats"))).toEqual([]);
+  });
+});

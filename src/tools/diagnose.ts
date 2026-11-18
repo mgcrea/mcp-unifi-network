@@ -3,9 +3,12 @@ import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
 import { rosterRecordsPastBlocks, summarizeKnownClient } from "#/client/legacy-shape";
+import type { StatsEngine } from "#/client/stats";
+import { summarizeClientHistory } from "#/client/stats-detect";
 import { eq } from "#/filter";
 import { normalizeMac } from "#/mac";
 import type { ToolContext } from "#/tools/index";
+import { readDeviceNames } from "#/tools/stats";
 import { compact, siteArg, wrap } from "#/tools/util";
 import { atLeast } from "#/version";
 
@@ -48,6 +51,11 @@ const macOrUndefined = (value: string): string | undefined => {
 
 type Port = { idx?: unknown; state?: unknown; poe?: Rec };
 
+/** History is read for at most this many matches: each one is two engine reads. */
+const HISTORY_MATCHES = 3;
+
+const describeError = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 const verdictFor = (r: Rec): keyof typeof VERDICTS =>
   r.blocked === true ? "blocked" : r.connectedNow === true ? "connected" : "known_offline";
 
@@ -55,6 +63,7 @@ export const registerDiagnoseTool = (
   server: McpServer,
   legacy: UnifiLegacyClient,
   ctx: ToolContext,
+  stats?: StatsEngine,
 ): void => {
   server.registerTool(
     "unifi_diagnose_client",
@@ -69,7 +78,9 @@ export const registerDiagnoseTool = (
         "trace in the ordinary client list, so starting with `unifi_list_clients` returns " +
         "nothing and reads misleadingly like an all-clear. For a wired device it also names " +
         "the switch port it was last plugged into and whether that port's PoE can reboot it — " +
-        "the only way to find where to power-cycle a device that has gone offline.",
+        "the only way to find where to power-cycle a device that has gone offline. On Network 11 " +
+        "each known device also gets `history24h`: its traffic, signal (with the worst hour), " +
+        "satisfaction, roams, last activity and the APs that carried it over the last day.",
       inputSchema: z.object({
         site: siteArg,
         device: z
@@ -206,15 +217,68 @@ export const registerDiagnoseTool = (
           return out;
         };
 
+        /**
+         * The device's last day from the statistics engine. Never rejects: a
+         * refused key or a timeout becomes `unavailable`, and the verdict —
+         * which is what the caller came for — still arrives.
+         */
+        let siteAndNames: Promise<[string, Map<string, string>]> | undefined;
+        const historyOf = async (mac: string): Promise<Rec> => {
+          if (!stats) return {};
+          try {
+            siteAndNames ??= Promise.all([
+              stats.siteId(name),
+              readDeviceNames(legacy, name).catch(() => new Map<string, string>()),
+            ]);
+            const [siteId, apNames] = await siteAndNames;
+            const [activity, roams] = await Promise.all([
+              stats.series({
+                schema: "activityBySiteByClient",
+                siteId,
+                period: "DAY",
+                match: { clientId: mac },
+                values: [
+                  "rxBytes",
+                  "txBytes",
+                  "durationMs",
+                  "avgSignalDbm",
+                  "avgSatisfactionScore",
+                ],
+                nested: "byDevice",
+              }),
+              stats.series({
+                schema: "roamBySiteByClient",
+                siteId,
+                period: "DAY",
+                match: { clientId: mac },
+                values: ["roamCount"],
+              }),
+            ]);
+            return summarizeClientHistory(activity, roams, apNames) ?? { empty: true };
+          } catch (err) {
+            return { unavailable: describeError(err) };
+          }
+        };
+
+        let historyBudget = HISTORY_MATCHES;
         const results = await Promise.all(
           matches.slice(0, 10).map(async (r) => {
             const verdict = verdictFor(r);
-            const lastPort = verdict === "blocked" ? undefined : await lastPortOf(r);
+            const wantsHistory =
+              stats !== undefined &&
+              (verdict === "connected" || verdict === "known_offline") &&
+              typeof r.mac === "string" &&
+              historyBudget-- > 0;
+            const [lastPort, history24h] = await Promise.all([
+              verdict === "blocked" ? undefined : lastPortOf(r),
+              wantsHistory ? historyOf(String(r.mac)) : undefined,
+            ]);
             return {
               ...r,
               verdict,
               explanation: VERDICTS[verdict],
               ...(lastPort ? { lastPort } : {}),
+              ...(history24h ? { history24h } : {}),
             };
           }),
         );
