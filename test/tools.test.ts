@@ -1259,3 +1259,84 @@ describe("unifi_get_stat_series", () => {
     expect(schemas.map((s) => s.name)).toEqual(STATS_SCHEMAS.map((s) => s.name));
   });
 });
+
+/** One wirelessBySiteByDevice bucket: 2.4 GHz with clients, 5 GHz as given. */
+const bands = (na: { rx: number; cu: number }, ngClients: number) => ({
+  distinctClientCount: ngClients,
+  byRadioBand: [
+    { radioBand: "ng", distinctClientCount: ngClients, rxBytes: 9000, avgTotalCuPct: 55 },
+    { radioBand: "na", rxBytes: na.rx, txBytes: na.rx, avgTotalCuPct: na.cu },
+  ],
+});
+/** A wanBySite row of twelve buckets at the given availability. */
+const wan = (availability: number) => [
+  {
+    siteId: STATS_SITE_ID,
+    series: statPoints(12, () => ({
+      rxBytes: 100,
+      txBytes: 50,
+      avgAvailabilityPct: availability,
+      avgLatencyMs: 12,
+    })),
+  },
+];
+
+describe("unifi_health_check history on Network 11", () => {
+  const SALON = { name: "UAP-AC-Pro Salon", mac: "80:2a:a8:49:ce:f2", state: 1 };
+  const radio = (deadFrom: number, total = 24) => [
+    {
+      siteId: STATS_SITE_ID,
+      deviceMac: SALON.mac,
+      series: statPoints(total, (i) =>
+        i >= deadFrom ? bands({ rx: 0, cu: 0 }, 9) : bands({ rx: 4000, cu: 3 }, 4),
+      ),
+    },
+  ];
+  const check = (series: Record<string, unknown[]>, status?: number) =>
+    legacyServer(
+      { device: [SALON] },
+      { probe: probeFor("11.0.99"), stats: { series, ...(status ? { status } : {}) } },
+    ).then((server) => server.call("unifi_health_check", {}));
+
+  it("warns about a 5 GHz radio that is silent right now", async () => {
+    const res = await check({ wirelessBySiteByDevice: radio(14), wanBySite: wan(100) });
+    expect(res.ok).toBe(false);
+    const wifi = (res.findings as { severity: string; area: string; detail: string }[]).find(
+      (f) => f.area === "wifi",
+    );
+    expect(wifi?.severity).toBe("warn");
+    expect(wifi?.detail).toMatch(/Salon.*5 GHz has carried nothing for 50 min/);
+    expect(wifi?.detail).toMatch(/up to 9 client/);
+  });
+
+  it("reports WAN availability below 99.5%", async () => {
+    const res = await check({ wanBySite: wan(98.9) });
+    expect(JSON.stringify(res.findings)).toMatch(/98\.9%/);
+    expect((res.summary as Rec).wan24h).toMatchObject({ availabilityPct: 98.9, rxBytes: 1200 });
+  });
+
+  it("degrades to a note when the engine refuses the account", async () => {
+    const res = await check({}, 403);
+    expect(res.ok).toBe(true);
+    const note = (res.findings as { area: string; detail: string }[]).find(
+      (f) => f.area === "history",
+    );
+    expect(note?.detail).toMatch(/Full Admin/);
+    expect((res.summary as Rec).wan24h).toBeNull();
+  });
+
+  it("finds nothing in an empty window", async () => {
+    const res = await check({});
+    expect(res.ok).toBe(true);
+    expect(res.findings).toEqual([]);
+    expect((res.summary as Rec).wan24h).toBeNull();
+  });
+
+  it("does not touch the engine below Network 11", async () => {
+    const server = await legacyServer({ device: [SALON] }, { stats: { series: {} } });
+    const res = await server.call("unifi_health_check", {});
+    expect(res.ok).toBe(true);
+    expect(server.urls().filter((u) => u.includes("/v2/api/stats"))).toEqual([]);
+    expect((res.summary as Rec).wan24h).toBeUndefined();
+  });
+});

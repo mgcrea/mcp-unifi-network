@@ -83,12 +83,11 @@ export const registerTools = (
     // Both compose the legacy roster with live state, so they belong to this
     // gate rather than the Integration one — the historical half is the part
     // that makes them worth calling, and only this transport has it.
-    registerDiagnoseTool(server, opts.legacy, ctx);
-    registerHealthTool(server, opts.legacy, ctx);
     // The engine is reached through the legacy transport, but exists only from
     // Network 11 — on 10.x every path under /v2/api/stats answers 404.
-    if (opts.stats && atLeast(ctx.probe.tier, "stats")) {
-      registerStatsTools(server, opts.stats, opts.legacy, ctx);
-    }
+    const stats = opts.stats && atLeast(ctx.probe.tier, "stats") ? opts.stats : undefined;
+    registerDiagnoseTool(server, opts.legacy, ctx);
+    registerHealthTool(server, opts.legacy, ctx, stats);
+    if (stats) registerStatsTools(server, stats, opts.legacy, ctx);
   }
 };

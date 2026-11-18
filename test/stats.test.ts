@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { SiteResolutionError, StatsUnavailableError } from "#/client/errors";
 import { UnifiLegacyClient } from "#/client/legacy";
 import { buildFilter, StatsEngine } from "#/client/stats";
+import type { SeriesRow } from "#/client/stats";
+import { findHungRadios, summarizeWan } from "#/client/stats-detect";
 import { BUCKET_MS, rollup, ruleFor } from "#/client/stats-rollup";
 import type { StatPoint } from "#/client/stats-rollup";
 
@@ -249,5 +251,114 @@ describe("StatsEngine", () => {
       .series({ schema: "wanBySite", siteId: SITE_ID, period: "DAY", values: ["rxBytes"] })
       .catch((e: unknown) => e);
     expect((err as StatsUnavailableError).reason).toBe("legacy");
+  });
+});
+
+type RadioBucket = { na?: { rx: number; tx: number; cu: number }; ngClients: number } | null;
+
+/**
+ * One AP's wirelessBySiteByDevice row. `null` is a missing bucket (the time
+ * still advances), and `partial` appends a short newest bucket.
+ */
+const radioRow = (
+  buckets: RadioBucket[],
+  opts: { partial?: RadioBucket; mac?: string } = {},
+): SeriesRow => {
+  const start = HOUR_START;
+  const series: StatPoint[] = [];
+  const point = (b: NonNullable<RadioBucket>, i: number, duration: number): StatPoint => ({
+    timestamp: start + i * FIVE_MIN,
+    duration,
+    byRadioBand: [
+      { radioBand: "ng", distinctClientCount: b.ngClients, rxBytes: 1000, avgTotalCuPct: 40 },
+      ...(b.na
+        ? [{ radioBand: "na", rxBytes: b.na.rx, txBytes: b.na.tx, avgTotalCuPct: b.na.cu }]
+        : []),
+    ],
+  });
+  buckets.forEach((b, i) => {
+    if (b) series.push(point(b, i, FIVE_MIN));
+  });
+  if (opts.partial) series.push(point(opts.partial, buckets.length, 60_000));
+  return { siteId: STATS_SITE_ID, deviceMac: opts.mac ?? "80:2a:a8:49:ce:f2", series };
+};
+
+const DEAD = { na: { rx: 0, tx: 0, cu: 0 }, ngClients: 6 };
+const LIVE = { na: { rx: 5000, tx: 9000, cu: 3.5 }, ngClients: 4 };
+const times = <T>(n: number, v: T): T[] => Array.from({ length: n }, () => v);
+
+const find = (row: SeriesRow) => findHungRadios([row], { bucketMs: FIVE_MIN });
+
+describe("findHungRadios", () => {
+  it("reports an ongoing silent 5 GHz run with clients on 2.4 GHz", () => {
+    const runs = find(radioRow([LIVE, LIVE, ...times(10, DEAD)]));
+    expect(runs).toEqual([
+      {
+        mac: "80:2a:a8:49:ce:f2",
+        fromMs: HOUR_START + 2 * FIVE_MIN,
+        toMs: HOUR_START + 11 * FIVE_MIN,
+        minutes: 50,
+        ngClientsMax: 6,
+        ongoing: true,
+      },
+    ]);
+  });
+
+  it("marks a run that recovered as ended", () => {
+    const runs = find(radioRow([...times(10, DEAD), LIVE, LIVE]));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.ongoing).toBe(false);
+  });
+
+  it("ignores a run shorter than 30 minutes", () => {
+    expect(find(radioRow([LIVE, ...times(5, DEAD)]))).toEqual([]);
+  });
+
+  it("ignores an idle radio that still sees channel use", () => {
+    const idle = { na: { rx: 0, tx: 0, cu: 1.2 }, ngClients: 6 };
+    expect(find(radioRow(times(10, idle)))).toEqual([]);
+  });
+
+  it("ignores silence when nobody is on 2.4 GHz either", () => {
+    const empty = { na: { rx: 0, tx: 0, cu: 0 }, ngClients: 0 };
+    expect(find(radioRow(times(10, empty)))).toEqual([]);
+  });
+
+  it("breaks a run at a gap in the timestamps", () => {
+    expect(find(radioRow([...times(4, DEAD), null, ...times(4, DEAD)]))).toEqual([]);
+  });
+
+  it("skips an AP with no 5 GHz band", () => {
+    expect(find(radioRow(times(10, { ngClients: 6 })))).toEqual([]);
+  });
+
+  it("neither extends nor breaks a run with the partial newest bucket", () => {
+    const withLivePartial = find(radioRow(times(6, DEAD), { partial: LIVE }));
+    expect(withLivePartial).toHaveLength(1);
+    expect(withLivePartial[0]).toMatchObject({ minutes: 30, ongoing: true });
+  });
+});
+
+describe("summarizeWan", () => {
+  it("weights availability by time", () => {
+    const row: SeriesRow = {
+      siteId: STATS_SITE_ID,
+      series: [
+        { timestamp: HOUR_START, duration: FIVE_MIN, avgAvailabilityPct: 100, rxBytes: 10 },
+        { timestamp: HOUR_START + FIVE_MIN, duration: FIVE_MIN, avgAvailabilityPct: 98 },
+      ],
+    };
+    expect(summarizeWan([row])).toEqual({
+      rxBytes: 10,
+      txBytes: 0,
+      availabilityPct: 99,
+      avgLatencyMs: null,
+      failoverS: 0,
+    });
+  });
+
+  it("has nothing to say about an empty window", () => {
+    expect(summarizeWan([])).toBeNull();
+    expect(summarizeWan([{ siteId: STATS_SITE_ID, series: [] }])).toBeNull();
   });
 });

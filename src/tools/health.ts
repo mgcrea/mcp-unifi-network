@@ -2,6 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
+import type { SeriesRow, StatsEngine } from "#/client/stats";
+import { findHungRadios, summarizeWan } from "#/client/stats-detect";
+import type { WanSummary } from "#/client/stats-detect";
+import { BUCKET_MS } from "#/client/stats-rollup";
 import type { ToolContext } from "#/tools/index";
 import { siteArg, wrap } from "#/tools/util";
 
@@ -23,10 +27,51 @@ const describe = (err: unknown): string => (err instanceof Error ? err.message :
  */
 type Finding = { severity: "warn" | "note"; area: string; detail: string };
 
+type History = { wireless: SeriesRow[]; wan: SeriesRow[] } | { error: string };
+
+/** Local wall-clock HH:MM, the way the person reading the finding tells time. */
+const clock = (ms: number): string => new Date(ms).toTimeString().slice(0, 5);
+
+/**
+ * The last 24 h from the statistics engine. Never rejects: history is an
+ * extra, and a View Only key or a timeout must not cost the live checks.
+ */
+const readHistory = async (stats: StatsEngine, legacyName: string): Promise<History> => {
+  try {
+    const siteId = await stats.siteId(legacyName);
+    const [wireless, wan] = await Promise.all([
+      stats.series({
+        schema: "wirelessBySiteByDevice",
+        siteId,
+        period: "DAY",
+        values: ["distinctClientCount"],
+        nested: "byRadioBand",
+      }),
+      stats.series({
+        schema: "wanBySite",
+        siteId,
+        period: "DAY",
+        values: [
+          "rxBytes",
+          "txBytes",
+          "avgAvailabilityPct",
+          "avgLatencyMs",
+          "maxLatencyMs",
+          "failoverS",
+        ],
+      }),
+    ]);
+    return { wireless, wan };
+  } catch (err) {
+    return { error: describe(err) };
+  }
+};
+
 export const registerHealthTool = (
   server: McpServer,
   legacy: UnifiLegacyClient,
   ctx: ToolContext,
+  stats?: StatsEngine,
 ): void => {
   server.registerTool(
     "unifi_health_check",
@@ -35,7 +80,11 @@ export const registerHealthTool = (
       description:
         'One-call answer to "is my network OK?" — subsystem health (WAN, LAN, WLAN, VPN, ' +
         "internet latency), device firmware and adoption state, WiFi security posture, blocked " +
-        "clients, and any configuration contradictions this server resolved at startup. Returns " +
+        "clients, and any configuration contradictions this server resolved at startup. On " +
+        "Network 11 it also reads the last 24 h of history, which catches what no live reading " +
+        "shows: a 5 GHz radio that broadcasts but has carried nothing for half an hour or more " +
+        "(a firmware hang that sends every client to 2.4 GHz), and WAN availability, failover " +
+        "and latency over the day. Returns " +
         "a ranked findings list rather than five raw payloads, so a clean network is a short " +
         "answer. Use it for open-ended health, audit or 'anything wrong?' questions; use " +
         "unifi_diagnose_client instead when a specific device is the complaint.",
@@ -78,6 +127,7 @@ export const registerHealthTool = (
           }
         };
 
+        const history = stats ? readHistory(stats, name) : undefined;
         const [health, devices, wlans, roster] = await Promise.all([
           read("subsystem health", "/stat/health"),
           read("the device list", "/stat/device"),
@@ -162,6 +212,54 @@ export const registerHealthTool = (
           );
         }
 
+        let wan24h: WanSummary | null | undefined;
+        if (history) {
+          const past = await history;
+          if ("error" in past) {
+            add("note", "history", `24 h history unavailable — ${past.error}`);
+            wan24h = null;
+          } else {
+            const names = new Map(
+              devs
+                .filter((d) => typeof d.mac === "string")
+                .map((d) => [String(d.mac).toLowerCase(), String(d.name ?? d.mac)]),
+            );
+            const bucketMs = BUCKET_MS.DAY;
+            for (const run of findHungRadios(past.wireless, { bucketMs })) {
+              const label = names.get(run.mac) ?? run.mac;
+              if (run.ongoing) {
+                add(
+                  "warn",
+                  "wifi",
+                  `"${label}" 5 GHz has carried nothing for ${run.minutes} min (since ` +
+                    `${clock(run.fromMs)}) while 2.4 GHz served up to ${run.ngClientsMax} ` +
+                    `client(s) — this matches a hung radio. Restart the AP (unifi_restart_device).`,
+                );
+              } else {
+                add(
+                  "note",
+                  "wifi",
+                  `"${label}" 5 GHz was silent ${clock(run.fromMs)}–` +
+                    `${clock(run.toMs + bucketMs)} (${run.minutes} min) with clients on ` +
+                    `2.4 GHz, then recovered.`,
+                );
+              }
+            }
+            wan24h = summarizeWan(past.wan);
+            const availability = wan24h?.availabilityPct ?? null;
+            const latency = wan24h?.avgLatencyMs ?? null;
+            if (availability !== null && availability < 99.5) {
+              add("warn", "wan", `24 h WAN availability ${availability}% (below 99.5%).`);
+            }
+            if (wan24h && wan24h.failoverS > 0) {
+              add("note", "wan", `WAN failed over for ${wan24h.failoverS} s in the last 24 h.`);
+            }
+            if (latency !== null && latency > 100) {
+              add("warn", "wan", `24 h average WAN latency ${latency} ms.`);
+            }
+          }
+        }
+
         for (const issue of ctx.config.issues) add("warn", "config", issue);
         if (ctx.probe.unreachable) {
           add(
@@ -198,6 +296,9 @@ export const registerHealthTool = (
               : null,
             clients: roster.ok ? { known: clients.length, blocked: blocked.length } : null,
             consoleVersion: ctx.probe.appVersion ?? null,
+            // Absent below Network 11; `null` when the engine could not answer
+            // or held no WAN points — not the same as a 0-byte day.
+            ...(wan24h === undefined ? {} : { wan24h }),
           },
           findings,
         };
