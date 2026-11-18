@@ -1,8 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ASSUMED_PROBE } from "#/client/probe";
+import type { Probe } from "#/client/probe";
 
-import { connect, jsonResponse, page, probeFor, READY_ENV, SITE_UUID, SITES } from "./harness.js";
+import {
+  connect,
+  jsonResponse,
+  page,
+  probeFor,
+  READY_ENV,
+  SITE_UUID,
+  SITES,
+  STATS_NOW,
+  STATS_SCHEMAS,
+  STATS_SITE_ID,
+  statPoints,
+} from "./harness.js";
 
 type Rec = Record<string, unknown>;
 
@@ -152,6 +165,20 @@ describe("registration matrix", () => {
         "unifi_legacy_reconnect_client",
       ]),
     );
+  });
+
+  it("adds the statistics tools on a Network 11 console with the legacy transport", async () => {
+    const names = await (
+      await connect({ env: LEGACY_KEY_ENV, probe: probeFor("11.0.99") })
+    ).toolNames();
+    expect(names).toEqual(
+      expect.arrayContaining(["unifi_get_stat_series", "unifi_list_stat_schemas"]),
+    );
+  });
+
+  it("offers no statistics tools without the legacy transport, even on Network 11", async () => {
+    const names = await (await connect({ probe: probeFor("11.0.99") })).toolNames();
+    expect(names.filter((n) => n.includes("stat_"))).toEqual([]);
   });
 
   it("gates the two transports independently", async () => {
@@ -653,16 +680,41 @@ describe("unifi_legacy_list_events", () => {
 });
 const rcOk = (data: unknown[]) => jsonResponse({ meta: { rc: "ok" }, data });
 
-/** Serves the four legacy reads the composite tools fan out to. */
-const legacyServer = async (routes: {
-  user?: unknown[];
-  sta?: unknown[];
-  health?: unknown[];
-  device?: unknown[];
-  wlanconf?: unknown[];
-}) => {
+export type StatsFixture = {
+  source?: string;
+  /** Answer every /v2/api/stats path with this status (e.g. 403 for a View Only key). */
+  status?: number;
+  /** Series rows by schema name; a schema left out answers `[]`. */
+  series?: Record<string, unknown[]>;
+};
+
+/**
+ * Serves the four legacy reads the composite tools fan out to, plus the Network
+ * 11 statistics engine when `stats` is given. The engine is matched FIRST:
+ * "/v2/api/stats" contains "/sta", which the row routes below would claim.
+ */
+const legacyServer = async (
+  routes: {
+    user?: unknown[];
+    sta?: unknown[];
+    health?: unknown[];
+    device?: unknown[];
+    wlanconf?: unknown[];
+  },
+  opts: { stats?: StatsFixture; probe?: Probe } = {},
+) => {
+  const { stats } = opts;
   const fetchMock = vi.fn(async (url: string) => {
     const u = String(url);
+    if (u.includes("/v2/api/stats/")) {
+      if (!stats) return jsonResponse({}, { status: 404 });
+      if (stats.status) return jsonResponse({ errorCode: stats.status }, { status: stats.status });
+      if (u.includes("/stats/source")) return jsonResponse(stats.source ?? "MODERN");
+      if (u.includes("/stats/schemas")) return jsonResponse(STATS_SCHEMAS);
+      const schema = new URL(u).searchParams.get("schema") ?? "";
+      return jsonResponse(stats.series?.[schema] ?? []);
+    }
+    if (u.includes("/api/self/sites")) return rcOk([{ _id: STATS_SITE_ID, name: "default" }]);
     for (const [key, rows] of Object.entries(routes)) {
       if (u.includes(`/${key.replace("wlanconf", "rest/wlanconf")}`)) return rcOk(rows ?? []);
     }
@@ -673,7 +725,11 @@ const legacyServer = async (routes: {
     if (u.includes("/rest/wlanconf")) return rcOk(routes.wlanconf ?? []);
     return jsonResponse(page(SITES));
   });
-  return connect({ env: LEGACY_KEY_ENV, fetchImpl: fetchMock });
+  return connect({
+    env: LEGACY_KEY_ENV,
+    fetchImpl: fetchMock,
+    ...(opts.probe ? { probe: opts.probe } : {}),
+  });
 };
 
 describe("unifi_diagnose_client", () => {
@@ -1044,5 +1100,162 @@ describe("a 401 that no retry can fix", () => {
 
     expect(res.isToolError).toBe(true);
     expect(server.urls().filter((u) => u.includes("/stat/health"))).toHaveLength(1);
+  });
+});
+
+/** The `filter` the stats engine was sent, from the series request's URL. */
+const filterOf = (urls: string[]) =>
+  new URL(urls.find((u) => u.includes("/recent/series")) ?? "https://x/").searchParams.get(
+    "filter",
+  );
+
+/** One client's activity series with a single bucket of `rx` bytes. */
+const clientSeries = (mac: string, rx: number) => ({
+  siteId: STATS_SITE_ID,
+  clientId: mac,
+  series: statPoints(1, () => ({ rxBytes: rx })),
+});
+
+describe("unifi_get_stat_series", () => {
+  const ON_11 = { probe: probeFor("11.0.99") };
+  const HOUR_ALIGNED = Math.floor(STATS_NOW / 3_600_000) * 3_600_000;
+
+  const serve = (series: Record<string, unknown[]>, device: unknown[] = []) =>
+    legacyServer({ device }, { ...ON_11, stats: { series } });
+
+  it("returns raw 5-minute points for an hour, with totals", async () => {
+    const wan = [{ siteId: STATS_SITE_ID, series: statPoints(12, () => ({ rxBytes: 10 })) }];
+    const res = await (
+      await serve({ wanBySite: wan })
+    ).call("unifi_get_stat_series", {
+      schema: "wanBySite",
+      period: "HOUR",
+      values: ["rxBytes"],
+    });
+    expect(res.isToolError).toBe(false);
+    const [first] = res.series as { points: unknown[]; totals: Rec }[];
+    expect(first?.points).toHaveLength(12);
+    expect(first?.totals.rxBytes).toBe(120);
+  });
+
+  it("folds a day into hourly points", async () => {
+    const wan = [
+      {
+        siteId: STATS_SITE_ID,
+        series: statPoints(288, () => ({ rxBytes: 1 }), { end: HOUR_ALIGNED }),
+      },
+    ];
+    const res = await (
+      await serve({ wanBySite: wan })
+    ).call("unifi_get_stat_series", {
+      schema: "wanBySite",
+    });
+    expect(res.resolution).toBe("hour");
+    expect((res.series as { points: unknown[] }[])[0]?.points).toHaveLength(24);
+  });
+
+  it("filters by client MAC however it is spelled", async () => {
+    const server = await serve({});
+    await server.call("unifi_get_stat_series", {
+      schema: "activityBySiteByClient",
+      client: "92B7C11E5251",
+    });
+    expect(filterOf(server.urls())).toBe(
+      `and(siteId.eq('${STATS_SITE_ID}'),clientId.eq('92:b7:c1:1e:52:51'))`,
+    );
+  });
+
+  it("refuses a client filter on a schema with no client key", async () => {
+    const res = await (
+      await serve({})
+    ).call("unifi_get_stat_series", {
+      schema: "wanBySite",
+      client: "92:b7:c1:1e:52:51",
+    });
+    expect(res.isToolError).toBe(true);
+    expect(String(res.error)).toMatch(/clientId/);
+  });
+
+  const DEVICES = [
+    { name: "UAP-AC-Pro Salon", mac: "80:2a:a8:49:ce:f2" },
+    { name: "UAP-AC-Pro Grenier", mac: "80:2a:a8:c0:27:f4" },
+  ];
+
+  it("resolves a device by name and labels its series", async () => {
+    const radio = [
+      { siteId: STATS_SITE_ID, deviceMac: "80:2a:a8:49:ce:f2", series: statPoints(2, () => ({})) },
+    ];
+    const server = await serve({ wirelessBySiteByDevice: radio }, DEVICES);
+    const res = await server.call("unifi_get_stat_series", {
+      schema: "wirelessBySiteByDevice",
+      device: "salon",
+    });
+    expect(filterOf(server.urls())).toContain("deviceMac.eq('80:2a:a8:49:ce:f2')");
+    expect((res.series as Rec[])[0]?.deviceName).toBe("UAP-AC-Pro Salon");
+  });
+
+  it("lists the candidates when a device name is ambiguous", async () => {
+    const res = await (
+      await serve({}, DEVICES)
+    ).call("unifi_get_stat_series", {
+      schema: "wirelessBySiteByDevice",
+      device: "UAP",
+    });
+    expect(res.isToolError).toBe(true);
+    expect(String(res.error)).toContain("UAP-AC-Pro Salon (80:2a:a8:49:ce:f2)");
+    expect(String(res.error)).toContain("UAP-AC-Pro Grenier");
+  });
+
+  it("names the known devices when none matches", async () => {
+    const res = await (
+      await serve({}, DEVICES)
+    ).call("unifi_get_stat_series", {
+      schema: "wirelessBySiteByDevice",
+      device: "kitchen",
+    });
+    expect(res.isToolError).toBe(true);
+    expect(String(res.error)).toContain("UAP-AC-Pro Salon");
+  });
+
+  it("keeps the busiest series first and says how many it dropped", async () => {
+    const res = await (
+      await serve({
+        activityBySiteByClient: [
+          clientSeries("aa:aa:aa:aa:aa:01", 5),
+          clientSeries("aa:aa:aa:aa:aa:02", 50),
+          clientSeries("aa:aa:aa:aa:aa:03", 20),
+        ],
+      })
+    ).call("unifi_get_stat_series", {
+      schema: "activityBySiteByClient",
+      values: ["rxBytes"],
+      limit: 2,
+    });
+    expect((res.series as Rec[]).map((s) => s.clientId)).toEqual([
+      "aa:aa:aa:aa:aa:02",
+      "aa:aa:aa:aa:aa:03",
+    ]);
+    expect(res.seriesTotal).toBe(3);
+    expect(res.truncated).toBe(true);
+  });
+
+  it("says why a window came back empty", async () => {
+    const res = await (await serve({})).call("unifi_get_stat_series", { schema: "wanBySite" });
+    expect(res.isToolError).toBe(false);
+    expect(res.seriesTotal).toBe(0);
+    expect(String(res.note)).toMatch(/no data/);
+  });
+
+  it("explains a refused account", async () => {
+    const server = await legacyServer({}, { ...ON_11, stats: { status: 403 } });
+    const res = await server.call("unifi_get_stat_series", { schema: "wanBySite" });
+    expect(res.isToolError).toBe(true);
+    expect(String(res.error)).toMatch(/Full Admin/);
+  });
+
+  it("lists the schemas compactly", async () => {
+    const res = await (await serve({})).call("unifi_list_stat_schemas", {});
+    const schemas = res.schemas as { name: string }[];
+    expect(schemas.map((s) => s.name)).toEqual(STATS_SCHEMAS.map((s) => s.name));
   });
 });

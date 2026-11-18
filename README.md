@@ -151,6 +151,8 @@ flag alone is enough:
 | `unifi_legacy_get_health`         | Raw per-subsystem health                                       |              |
 | `unifi_legacy_list_events`        | Controller event log                                           |              |
 | `unifi_legacy_list_alarms`        | Open alarms                                                    |              |
+| `unifi_list_stat_schemas`         | What history the Network 11 engine keeps (11.0+)               |              |
+| `unifi_get_stat_series`           | History: WAN, radios, clients, ports — any schema (11.0+)      |              |
 | `unifi_legacy_request`            | Escape hatch: port forwarding, adoption, upgrades, DPI         | W ⚠️ non-GET |
 | `unifi_legacy_unblock_client`     | Let a blocked client back on                                   | W            |
 | `unifi_legacy_block_client`       | Block a client by MAC                                          | W ⚠️         |

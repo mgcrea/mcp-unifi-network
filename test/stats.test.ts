@@ -6,6 +6,8 @@ import { buildFilter, StatsEngine } from "#/client/stats";
 import { BUCKET_MS, rollup, ruleFor } from "#/client/stats-rollup";
 import type { StatPoint } from "#/client/stats-rollup";
 
+import { STATS_SCHEMAS, STATS_SITE_ID } from "./harness.js";
+
 const FIVE_MIN = 300_000;
 const HOUR_START = Date.UTC(2026, 10, 18, 18, 0, 0);
 
@@ -130,30 +132,7 @@ describe("rollup", () => {
   });
 });
 
-const SITE_ID = "6606f482-fa87-4302-b6c6-7ea5b78781a8";
-
-const SCHEMAS = [
-  {
-    name: "wanBySite",
-    keys: ["siteId"],
-    values: ["rxBytes", "txBytes", "avgAvailabilityPct", "avgLatencyMs", "failoverS"],
-    nested: [{ name: "byNetworkGroup", keys: ["networkGroup"], values: ["rxBytes"], nested: null }],
-  },
-  {
-    name: "wirelessBySiteByDevice",
-    keys: ["siteId", "deviceMac"],
-    values: ["distinctClientCount", "rxBytes"],
-    nested: [
-      { name: "byRadioBand", keys: ["radioBand"], values: ["rxBytes", "txBytes"], nested: null },
-    ],
-  },
-  {
-    name: "activityBySiteByClient",
-    keys: ["siteId", "clientId"],
-    values: ["rxBytes", "txBytes", "durationMs", "avgSignalDbm"],
-    nested: null,
-  },
-];
+const SITE_ID = STATS_SITE_ID;
 
 type Route = { status?: number; body: unknown };
 
@@ -183,7 +162,7 @@ const engineWith = (routes: Record<string, Route>, now = 1_795_028_672_455) => {
 
 const MODERN: Record<string, Route> = {
   "/v2/api/stats/source": { body: "MODERN" },
-  "/v2/api/stats/schemas": { body: SCHEMAS },
+  "/v2/api/stats/schemas": { body: STATS_SCHEMAS },
   "/v2/api/stats/recent/series": { body: [] },
   "/api/self/sites": { body: { meta: { rc: "ok" }, data: [{ _id: SITE_ID, name: "default" }] } },
 };

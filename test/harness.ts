@@ -121,3 +121,66 @@ export const connect = async (opts: ConnectOptions = {}): Promise<Connected> => 
     urls: (): string[] => fetchMock.mock.calls.map((c) => String(c[0])),
   };
 };
+
+// ------------------------------------------------------------ stats engine --
+
+/** The `/api/self/sites` `_id` of the "default" site: the stats engine's site key. */
+export const STATS_SITE_ID = "6606f482-fa87-4302-b6c6-7ea5b78781a8";
+
+/** A subset of the live 11.0.99 schema list, shaped exactly like it. */
+export const STATS_SCHEMAS = [
+  {
+    name: "wanBySite",
+    keys: ["siteId"],
+    values: [
+      "rxBytes",
+      "txBytes",
+      "avgAvailabilityPct",
+      "avgLatencyMs",
+      "maxLatencyMs",
+      "failoverS",
+    ],
+    nested: [{ name: "byNetworkGroup", keys: ["networkGroup"], values: ["rxBytes"], nested: null }],
+  },
+  {
+    name: "wirelessBySiteByDevice",
+    keys: ["siteId", "deviceMac"],
+    values: ["distinctClientCount", "rxBytes"],
+    nested: [
+      {
+        name: "byRadioBand",
+        keys: ["radioBand"],
+        values: ["distinctClientCount", "rxBytes", "txBytes", "avgTotalCuPct"],
+        nested: null,
+      },
+    ],
+  },
+  {
+    name: "activityBySiteByClient",
+    keys: ["siteId", "clientId"],
+    values: ["rxBytes", "txBytes", "durationMs", "avgSignalDbm", "avgSatisfactionScore"],
+    nested: [
+      { name: "byDevice", keys: ["deviceMac"], values: ["durationMs", "rxBytes"], nested: null },
+    ],
+  },
+  { name: "roamBySiteByClient", keys: ["siteId", "clientId"], values: ["roamCount"], nested: null },
+];
+
+/** Consecutive engine points ending just before `end`, each built by `make(i)`. */
+export const statPoints = (
+  n: number,
+  make: (i: number) => Record<string, unknown>,
+  opts: { end?: number; bucketMs?: number } = {},
+): { timestamp: number; duration: number }[] => {
+  const bucketMs = opts.bucketMs ?? 300_000;
+  const end = opts.end ?? STATS_NOW;
+  const first = Math.floor(end / bucketMs) * bucketMs - n * bucketMs;
+  return Array.from({ length: n }, (_, i) => ({
+    timestamp: first + i * bucketMs,
+    duration: bucketMs,
+    ...make(i),
+  }));
+};
+
+/** The fixed "now" stats fixtures are built around. */
+export const STATS_NOW = 1_795_028_672_455;

@@ -6,6 +6,7 @@ import { UnifiLegacyClient } from "#/client/legacy";
 import { ASSUMED_PROBE } from "#/client/probe";
 import type { Probe } from "#/client/probe";
 import { SiteResolver } from "#/client/sites";
+import { StatsEngine } from "#/client/stats";
 import { createHttpFetch } from "#/client/tls";
 import { UnifiClient } from "#/client/unifi";
 import {
@@ -120,7 +121,7 @@ export const createServer = (opts: CreateServerOptions): CreatedServer => {
       sites,
       integrationBaseUrl: integrationReady(config) ? baseUrl : undefined,
     },
-    { legacy },
+    { legacy, stats: legacy ? new StatsEngine(legacy) : undefined },
   );
 
   return { server, client, legacy, sites };

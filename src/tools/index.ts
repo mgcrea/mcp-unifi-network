@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { UnifiLegacyClient } from "#/client/legacy";
 import type { Probe } from "#/client/probe";
 import type { SiteResolver } from "#/client/sites";
+import type { StatsEngine } from "#/client/stats";
 import type { UnifiClient } from "#/client/unifi";
 import { integrationReady, legacyReady } from "#/config";
 import type { Config } from "#/config";
@@ -15,6 +16,7 @@ import { registerLegacyRequestTool, registerLegacyTools } from "#/tools/legacy";
 import { registerNetworkTools } from "#/tools/network";
 import { registerRequestTool } from "#/tools/request";
 import { registerSiteTools } from "#/tools/sites";
+import { registerStatsTools } from "#/tools/stats";
 import { registerStatusTool } from "#/tools/status";
 import { registerVoucherTools } from "#/tools/vouchers";
 import { atLeast } from "#/version";
@@ -32,6 +34,8 @@ export type ToolContext = {
 
 export type RegisterOptions = {
   legacy?: UnifiLegacyClient | undefined;
+  /** The Network 11 statistics engine, which rides the legacy transport. */
+  stats?: StatsEngine | undefined;
 };
 
 /**
@@ -81,5 +85,10 @@ export const registerTools = (
     // that makes them worth calling, and only this transport has it.
     registerDiagnoseTool(server, opts.legacy, ctx);
     registerHealthTool(server, opts.legacy, ctx);
+    // The engine is reached through the legacy transport, but exists only from
+    // Network 11 — on 10.x every path under /v2/api/stats answers 404.
+    if (opts.stats && atLeast(ctx.probe.tier, "stats")) {
+      registerStatsTools(server, opts.stats, opts.legacy, ctx);
+    }
   }
 };
