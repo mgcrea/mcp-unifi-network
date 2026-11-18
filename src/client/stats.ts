@@ -10,8 +10,8 @@
 //    `start` is ignored before 11.0.89, so a window is always `period` + `end`.
 //
 // The site filter takes neither of the identifiers the rest of this server
-// uses. It wants the `_id` of the site's `/api/self/sites` record — a THIRD
-// identifier, distinct from the Integration UUID and from "default" — so it is
+// uses. It wants the `_id` of the site's `/api/self/sites` record — yet another
+// identifier, distinct from the Integration UUID, "default" and the display name — so it is
 // resolved here and never asked of the caller.
 
 import { SiteResolutionError, StatsUnavailableError, UnifiLegacyError } from "#/client/errors";
@@ -39,6 +39,11 @@ export type SeriesRequest = {
   match?: Record<string, string>;
   values: string[];
   nested?: string;
+  /**
+   * Only these values of the nested group. Without it the engine returns every
+   * field of every entry — 2.3 MB for one day of five APs' radio bands.
+   */
+  nestedValues?: string[];
 };
 
 /** UUIDs and MACs only: anything else could step outside the filter grammar. */
@@ -180,8 +185,22 @@ export class StatsEngine {
       );
     }
 
-    const projection =
-      `values(${req.values.join(",")})` + (req.nested ? `,nested(${req.nested})` : "");
+    const group = (schema.nested ?? []).find((n) => n.name === req.nested);
+    const unknownNested = (req.nestedValues ?? []).filter((v) => !group?.values.includes(v));
+    if (group && unknownNested.length > 0) {
+      throw new Error(
+        `Nested group ${group.name} has no value ${describeNames(unknownNested)}. ` +
+          `Its values: ${describeNames(group.values)}.`,
+      );
+    }
+
+    // Verified live: `nested(g(values(a,b)))` narrows a group; `nested(g,values(…))` is a 400.
+    const nested = req.nested
+      ? req.nestedValues && req.nestedValues.length > 0
+        ? `,nested(${req.nested}(values(${req.nestedValues.join(",")})))`
+        : `,nested(${req.nested})`
+      : "";
+    const projection = `values(${req.values.join(",")})${nested}`;
     const raw = await this.get<unknown>("/v2/api/stats/recent/series", {
       schema: schema.name,
       period: req.period,

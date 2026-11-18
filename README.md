@@ -287,6 +287,13 @@ All of these are baked into the tool descriptions, but they explain the shape of
     reported where the roster can still tell, and `everBlockedCount` is `null` where it cannot.
 11. **Login is rate-limited.** The legacy session is established once per server start and reused;
     a 429 on login is never retried, because retrying deepens the lockout.
+12. **On Network 11, history moved and the old endpoints lie about it.** `stat/report/*` answers
+    `{"meta":{"rc":"ok"},"data":[]}` forever — a success with nothing in it, indistinguishable from
+    a quiet network. Every time series now lives in an off-spec engine under `/v2/api/stats`,
+    which `unifi_get_stat_series` reads. Its site filter takes a **fourth** site identifier: the
+    `_id` of the site's `/api/self/sites` record, which is neither the UUID nor `default`. The
+    tools resolve it for you. For client schemas, `rxBytes` is what the **client received** — the
+    reverse of `stat/sta`, which counts from the access point. View Only accounts get a 403.
 
 ## Troubleshooting
 

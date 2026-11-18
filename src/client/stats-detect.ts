@@ -34,20 +34,35 @@ const band = (point: StatPoint, name: string): Rec | undefined => {
   return (bands as Rec[]).find((b) => b.radioBand === name);
 };
 
-/** A silent 5 GHz bucket while clients were on 2.4 GHz, or undefined. */
-const silentClients = (point: StatPoint): number | undefined => {
+/**
+ * Under this, a 5 GHz band carrying zero bytes is dead rather than idle.
+ * Measured on a live console over 24 h: a hung radio's zero-byte buckets read
+ * under 0.5% channel use in 246 of 248 (it flickers, up to 2.1%), while healthy
+ * idle 5 GHz radios never read under 1% — they still hear neighbours' beacons.
+ */
+const DEAD_CU_PCT = 0.5;
+
+/** How many flickering buckets a run may contain in a row before it ends. */
+const MAX_BRIDGED = 2;
+
+type Bucket = { kind: "dead" | "blip" | "live"; ngClients: number };
+
+const classify = (point: StatPoint): Bucket => {
   const na = band(point, "na");
-  if (!na) return undefined;
-  const dead = num(na.rxBytes) + num(na.txBytes) === 0 && num(na.avgTotalCuPct) === 0;
   const ngClients = num(band(point, "ng")?.distinctClientCount);
-  return dead && ngClients >= 1 ? ngClients : undefined;
+  if (!na || ngClients < 1 || num(na.rxBytes) + num(na.txBytes) > 0) {
+    return { kind: "live", ngClients };
+  }
+  return { kind: num(na.avgTotalCuPct) < DEAD_CU_PCT ? "dead" : "blip", ngClients };
 };
 
 /**
  * Runs of at least `minMinutes` where a 5 GHz band carried nothing while
  * 2.4 GHz served clients. Only closed buckets count — the newest one is still
  * filling — and a missing timestamp ends a run, so a hang is never stitched
- * together across a stretch the console did not record.
+ * together across a stretch the console did not record. Up to two zero-byte
+ * buckets whose channel use flickers above the dead threshold are carried
+ * inside a run, but never start or end one.
  */
 export const findHungRadios = (
   rows: SeriesRow[],
@@ -59,43 +74,60 @@ export const findHungRadios = (
 
   for (const row of rows) {
     if (typeof row.deviceMac !== "string") continue;
+    const mac = row.deviceMac;
     const closed = row.series
       .filter((p) => p.duration === bucketMs)
       .toSorted((a, b) => a.timestamp - b.timestamp);
     const newest = closed.at(-1)?.timestamp;
 
     let run: { fromMs: number; toMs: number; ngClientsMax: number } | undefined;
+    let lastMs = 0;
+    let bridged = 0;
+    let bridgedClients = 0;
     const close = () => {
-      if (!run) return;
-      const minutes = (run.toMs + bucketMs - run.fromMs) / 60_000;
-      if (minutes >= minMinutes) {
-        runs.push({
-          mac: row.deviceMac as string,
-          ...run,
-          minutes,
-          ongoing: run.toMs === newest,
-        });
+      if (run) {
+        const minutes = (run.toMs + bucketMs - run.fromMs) / 60_000;
+        if (minutes >= minMinutes) {
+          runs.push({ mac, ...run, minutes, ongoing: run.toMs === newest });
+        }
       }
       run = undefined;
+      bridged = 0;
+      bridgedClients = 0;
     };
 
     for (const point of closed) {
-      const clients = silentClients(point);
-      if (run && point.timestamp !== run.toMs + bucketMs) close();
-      if (clients === undefined) {
+      if (run && point.timestamp !== lastMs + bucketMs) close();
+      lastMs = point.timestamp;
+      const bucket = classify(point);
+
+      if (bucket.kind === "live") {
         close();
-        continue;
-      }
-      if (run) {
+      } else if (bucket.kind === "blip") {
+        if (!run) continue;
+        bridged += 1;
+        bridgedClients = Math.max(bridgedClients, bucket.ngClients);
+        if (bridged > MAX_BRIDGED) close();
+      } else if (run) {
         run.toMs = point.timestamp;
-        run.ngClientsMax = Math.max(run.ngClientsMax, clients);
+        run.ngClientsMax = Math.max(run.ngClientsMax, bucket.ngClients, bridgedClients);
+        bridged = 0;
+        bridgedClients = 0;
       } else {
-        run = { fromMs: point.timestamp, toMs: point.timestamp, ngClientsMax: clients };
+        run = { fromMs: point.timestamp, toMs: point.timestamp, ngClientsMax: bucket.ngClients };
       }
     }
     close();
   }
   return runs;
+};
+
+/** "50 min", "1 h", "20 h 40 min". */
+export const formatMinutes = (minutes: number): string => {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
 };
 
 export type WanSummary = {

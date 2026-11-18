@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
 import type { SeriesRow, StatsEngine } from "#/client/stats";
-import { findHungRadios, summarizeWan } from "#/client/stats-detect";
+import { findHungRadios, formatMinutes, summarizeWan } from "#/client/stats-detect";
 import type { WanSummary } from "#/client/stats-detect";
 import { BUCKET_MS } from "#/client/stats-rollup";
 import type { ToolContext } from "#/tools/index";
@@ -46,6 +46,9 @@ const readHistory = async (stats: StatsEngine, legacyName: string): Promise<Hist
         period: "DAY",
         values: ["distinctClientCount"],
         nested: "byRadioBand",
+        // Everything the detector reads, and nothing else: unnarrowed, a day of
+        // five APs is 2.3 MB, and the legacy transport refuses 5 MB.
+        nestedValues: ["distinctClientCount", "rxBytes", "txBytes", "avgTotalCuPct"],
       }),
       stats.series({
         schema: "wanBySite",
@@ -231,7 +234,7 @@ export const registerHealthTool = (
                 add(
                   "warn",
                   "wifi",
-                  `"${label}" 5 GHz has carried nothing for ${run.minutes} min (since ` +
+                  `"${label}" 5 GHz has carried nothing for ${formatMinutes(run.minutes)} (since ` +
                     `${clock(run.fromMs)}) while 2.4 GHz served up to ${run.ngClientsMax} ` +
                     `client(s) — this matches a hung radio. Restart the AP (unifi_restart_device).`,
                 );
@@ -240,7 +243,7 @@ export const registerHealthTool = (
                   "note",
                   "wifi",
                   `"${label}" 5 GHz was silent ${clock(run.fromMs)}–` +
-                    `${clock(run.toMs + bucketMs)} (${run.minutes} min) with clients on ` +
+                    `${clock(run.toMs + bucketMs)} (${formatMinutes(run.minutes)}) with clients on ` +
                     `2.4 GHz, then recovered.`,
                 );
               }

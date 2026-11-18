@@ -4,7 +4,12 @@ import { SiteResolutionError, StatsUnavailableError } from "#/client/errors";
 import { UnifiLegacyClient } from "#/client/legacy";
 import { buildFilter, StatsEngine } from "#/client/stats";
 import type { SeriesRow } from "#/client/stats";
-import { findHungRadios, summarizeClientHistory, summarizeWan } from "#/client/stats-detect";
+import {
+  findHungRadios,
+  formatMinutes,
+  summarizeClientHistory,
+  summarizeWan,
+} from "#/client/stats-detect";
 import { BUCKET_MS, rollup, ruleFor } from "#/client/stats-rollup";
 import type { StatPoint } from "#/client/stats-rollup";
 
@@ -201,6 +206,36 @@ describe("StatsEngine", () => {
     });
   });
 
+  it("narrows a nested group to the values asked for", async () => {
+    const { engine, fetchMock } = engineWith(MODERN);
+    await engine.series({
+      schema: "wirelessBySiteByDevice",
+      siteId: SITE_ID,
+      period: "DAY",
+      values: ["distinctClientCount"],
+      nested: "byRadioBand",
+      nestedValues: ["rxBytes", "txBytes"],
+    });
+    const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]));
+    expect(url.searchParams.get("projection")).toBe(
+      "values(distinctClientCount),nested(byRadioBand(values(rxBytes,txBytes)))",
+    );
+  });
+
+  it("rejects a nested value the group does not have", async () => {
+    const { engine } = engineWith(MODERN);
+    await expect(
+      engine.series({
+        schema: "wirelessBySiteByDevice",
+        siteId: SITE_ID,
+        period: "DAY",
+        values: ["rxBytes"],
+        nested: "byRadioBand",
+        nestedValues: ["bogus"],
+      }),
+    ).rejects.toThrow(/avgTotalCuPct/);
+  });
+
   it("rejects a value the schema does not have, naming the ones it does", async () => {
     const { engine } = engineWith(MODERN);
     await expect(
@@ -319,6 +354,33 @@ describe("findHungRadios", () => {
     expect(find(radioRow(times(10, idle)))).toEqual([]);
   });
 
+  // Live: a hung radio's zero-byte buckets read under 0.5% channel use (246 of
+  // 248), while idle-but-healthy 5 GHz radios never read under 1%.
+  it("counts a hung radio whose channel use flickers just above zero", () => {
+    const flicker = { na: { rx: 0, tx: 0, cu: 0.21 }, ngClients: 6 };
+    expect(find(radioRow([...times(5, DEAD), flicker, ...times(4, DEAD)]))).toEqual([
+      expect.objectContaining({ minutes: 50, ongoing: true }),
+    ]);
+  });
+
+  it("bridges up to two zero-byte buckets with higher channel use inside a run", () => {
+    const blip = { na: { rx: 0, tx: 0, cu: 2.1 }, ngClients: 8 };
+    const runs = find(radioRow([...times(6, DEAD), blip, blip, ...times(6, DEAD)]));
+    expect(runs).toEqual([expect.objectContaining({ minutes: 70, ngClientsMax: 8 })]);
+  });
+
+  it("ends a run at a third such bucket", () => {
+    const blip = { na: { rx: 0, tx: 0, cu: 2.1 }, ngClients: 8 };
+    const runs = find(radioRow([...times(6, DEAD), blip, blip, blip, ...times(6, DEAD)]));
+    expect(runs.map((r) => r.minutes)).toEqual([30, 30]);
+  });
+
+  it("does not let trailing blips extend a run", () => {
+    const blip = { na: { rx: 0, tx: 0, cu: 2.1 }, ngClients: 8 };
+    const runs = find(radioRow([...times(6, DEAD), blip, LIVE]));
+    expect(runs).toEqual([expect.objectContaining({ minutes: 30, ongoing: false })]);
+  });
+
   it("ignores silence when nobody is on 2.4 GHz either", () => {
     const empty = { na: { rx: 0, tx: 0, cu: 0 }, ngClients: 0 };
     expect(find(radioRow(times(10, empty)))).toEqual([]);
@@ -336,6 +398,14 @@ describe("findHungRadios", () => {
     const withLivePartial = find(radioRow(times(6, DEAD), { partial: LIVE }));
     expect(withLivePartial).toHaveLength(1);
     expect(withLivePartial[0]).toMatchObject({ minutes: 30, ongoing: true });
+  });
+});
+
+describe("formatMinutes", () => {
+  it("keeps short runs in minutes and long ones in hours", () => {
+    expect(formatMinutes(50)).toBe("50 min");
+    expect(formatMinutes(60)).toBe("1 h");
+    expect(formatMinutes(1240)).toBe("20 h 40 min");
   });
 });
 

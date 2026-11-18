@@ -133,7 +133,9 @@ export const registerStatsTools = (
         "switch port carried what. Pick a schema from unifi_list_stat_schemas. Buckets are 5 " +
         "minutes for HOUR and DAY, 1 hour for WEEK, 8 hours for MONTH (30 days is the longest " +
         "window), folded to `resolution` here: bytes and packets are summed, averages weighted " +
-        "by time, distinct counts take the maximum. Narrow with `client` or `device` rather " +
+        "by time, distinct counts take the maximum. For client schemas rx/tx are from the " +
+        "client's side — rxBytes is what the client received, the reverse of stat/sta. Narrow " +
+        "with `client` or `device` rather " +
         "than reading a whole site — an unfiltered client schema is one series per client.",
       inputSchema: z.object({
         site: siteArg,
@@ -163,6 +165,14 @@ export const registerStatsTools = (
           .string()
           .optional()
           .describe("One nested group to include, e.g. byRadioBand, byRadioName, byPort."),
+        nestedValues: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe(
+            "Only these values of the nested group. Worth passing: a nested group returns every " +
+              "field of every entry otherwise, and a day of radio bands across a site runs to MBs.",
+          ),
         resolution: z
           .enum(["auto", "raw", "hour", "day", "total"])
           .default("auto")
@@ -206,6 +216,7 @@ export const registerStatsTools = (
           match,
           values,
           ...(args.nested ? { nested: args.nested } : {}),
+          ...(args.nestedValues ? { nestedValues: args.nestedValues } : {}),
         });
 
         const resolution =

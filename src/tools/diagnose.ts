@@ -79,7 +79,8 @@ export const registerDiagnoseTool = (
         "nothing and reads misleadingly like an all-clear. For a wired device it also names " +
         "the switch port it was last plugged into and whether that port's PoE can reboot it — " +
         "the only way to find where to power-cycle a device that has gone offline. On Network 11 " +
-        "each known device also gets `history24h`: its traffic, signal (with the worst hour), " +
+        "each known device also gets `history24h`: its traffic (rxBytes is what it received), " +
+        "signal (with the worst hour), " +
         "satisfaction, roams, last activity and the APs that carried it over the last day.",
       inputSchema: z.object({
         site: siteArg,
