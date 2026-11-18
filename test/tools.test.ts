@@ -686,6 +686,8 @@ export type StatsFixture = {
   status?: number;
   /** Series rows by schema name; a schema left out answers `[]`. */
   series?: Record<string, unknown[]>;
+  /** Never answer any /v2/api/stats request, like an engine that has hung. */
+  hang?: boolean;
 };
 
 /**
@@ -708,6 +710,7 @@ const legacyServer = async (
     const u = String(url);
     if (u.includes("/v2/api/stats/")) {
       if (!stats) return jsonResponse({}, { status: 404 });
+      if (stats.hang) return new Promise<Response>(() => {});
       if (stats.status) return jsonResponse({ errorCode: stats.status }, { status: stats.status });
       if (u.includes("/stats/source")) return jsonResponse(stats.source ?? "MODERN");
       if (u.includes("/stats/schemas")) return jsonResponse(STATS_SCHEMAS);
@@ -1239,6 +1242,62 @@ describe("unifi_get_stat_series", () => {
     expect(res.truncated).toBe(true);
   });
 
+  it("keeps each switch port apart when folding", async () => {
+    const ports = [
+      {
+        siteId: STATS_SITE_ID,
+        deviceMac: "78:8a:20:7f:ac:e4",
+        unitId: "1",
+        series: statPoints(2, () => ({
+          byPort: [
+            { portIdx: 1, rxBytes: 10 },
+            { portIdx: 2, rxBytes: 7 },
+          ],
+        })),
+      },
+    ];
+    const res = await (
+      await serve({ portBySiteByDevice: ports })
+    ).call("unifi_get_stat_series", {
+      schema: "portBySiteByDevice",
+      nested: "byPort",
+      resolution: "total",
+    });
+    const [series] = res.series as { totals: Rec }[];
+    expect(series?.totals.byPort).toEqual([
+      { portIdx: 1, rxBytes: 20 },
+      { portIdx: 2, rxBytes: 14 },
+    ]);
+  });
+
+  // Review: `limit` capped the series but not points x values — raw DAY over a
+  // client schema ran to ~68 KB a series, 6.8 MB at limit 100.
+  it("coarsens rather than return an oversized result, and says so", async () => {
+    const busy = Array.from({ length: 30 }, (_, n) => ({
+      siteId: STATS_SITE_ID,
+      clientId: `aa:aa:aa:aa:aa:${String(n).padStart(2, "0")}`,
+      series: statPoints(288, (i) => ({
+        rxBytes: 1000 + i,
+        txBytes: 500 + i,
+        durationMs: 300_000,
+        avgSignalDbm: -60.25,
+        avgSatisfactionScore: 97.5,
+      })),
+    }));
+    const res = await (
+      await serve({ activityBySiteByClient: busy })
+    ).call("unifi_get_stat_series", {
+      schema: "activityBySiteByClient",
+      period: "DAY",
+      resolution: "raw",
+      limit: 30,
+    });
+    expect(JSON.stringify(res).length).toBeLessThan(120_000);
+    expect(res.resolution).not.toBe("raw");
+    expect(res.coarsenedFrom).toBe("raw");
+    expect(String(res.note)).toMatch(/coarsened/);
+  });
+
   it("says why a window came back empty", async () => {
     const res = await (await serve({})).call("unifi_get_stat_series", { schema: "wanBySite" });
     expect(res.isToolError).toBe(false);
@@ -1325,6 +1384,24 @@ describe("unifi_health_check history on Network 11", () => {
     expect((res.summary as Rec).wan24h).toBeNull();
   });
 
+  // Review: nothing bounded these reads, so a hung engine hung the health check.
+  it("gives up on a hung engine and still answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const server = await legacyServer(
+        { device: [SALON] },
+        { probe: probeFor("11.0.99"), stats: { hang: true } },
+      );
+      const pending = server.call("unifi_health_check", {});
+      await vi.advanceTimersByTimeAsync(5_000);
+      const res = await pending;
+      expect(res.ok).toBe(true);
+      expect(JSON.stringify(res.findings)).toMatch(/history.*did not answer within 5 s/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("finds nothing in an empty window", async () => {
     const res = await check({});
     expect(res.ok).toBe(true);
@@ -1375,6 +1452,23 @@ describe("unifi_diagnose_client history on Network 11", () => {
     const { res } = await diagnose("Fridge", { status: 403 });
     expect(res.isToolError).toBe(false);
     expect(String((firstResult(res).history24h as Rec).unavailable)).toMatch(/Full Admin/);
+  });
+
+  it("gives up on a hung engine and still diagnoses", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const server = await legacyServer(
+        { user: USERS },
+        { probe: probeFor("11.0.99"), stats: { hang: true } },
+      );
+      const pending = server.call("unifi_diagnose_client", { device: "Fridge" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const res = await pending;
+      expect(res.isToolError).toBe(false);
+      expect(String((firstResult(res).history24h as Rec).unavailable)).toMatch(/within 5 s/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gives a blocked device no history", async () => {

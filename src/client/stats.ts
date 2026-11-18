@@ -83,6 +83,43 @@ const LEGACY =
 
 const describeNames = (names: string[]): string => names.join(", ");
 
+/** How long a tool waits for history it only uses to enrich its answer. */
+export const HISTORY_TIMEOUT_MS = 5_000;
+
+/**
+ * Race a history read against a timer. The request itself is not cancelled —
+ * the transport has no signal — but the tool answers without it, which is the
+ * point: a hung engine must not hang the health check.
+ */
+export const withTimeout = <T>(work: Promise<T>, ms: number = HISTORY_TIMEOUT_MS): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `The statistics engine did not answer within ${ms / 1000} s, so history was skipped.`,
+          ),
+        ),
+      ms,
+    );
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+};
+
+/** Every nested group's key fields, at any depth, for `rollup`. */
+export const nestedKeysOf = (schema: StatSchema): Record<string, string[]> => {
+  const out: Record<string, string[]> = {};
+  const walk = (groups: StatSchema[] | null) => {
+    for (const group of groups ?? []) {
+      out[group.name] = group.keys;
+      walk(group.nested);
+    }
+  };
+  walk(schema.nested);
+  return out;
+};
+
 export class StatsEngine {
   private readonly legacy: UnifiLegacyClient;
   private readonly clock: () => number;

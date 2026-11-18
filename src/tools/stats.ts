@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
+import { nestedKeysOf } from "#/client/stats";
 import type { Period, SeriesRow, StatSchema, StatsEngine } from "#/client/stats";
 import { BUCKET_MS, rollup } from "#/client/stats-rollup";
 import type { Resolution } from "#/client/stats-rollup";
@@ -17,6 +18,12 @@ const AUTO_RESOLUTION: Record<Period, Resolution> = {
   WEEK: "day",
   MONTH: "day",
 };
+
+/** Resolutions from finest to coarsest, for shrinking an oversized answer. */
+const LADDER: Resolution[] = ["raw", "hour", "day", "total"];
+
+/** Most characters of series a result may carry, roughly 25k tokens. */
+const OUTPUT_BUDGET = 100_000;
 
 const EMPTY_NOTE =
   "The engine returned no data for this window — a future `end`, a console with no history " +
@@ -233,26 +240,62 @@ export const registerStatsTools = (
           ? await readDeviceNames(legacy, legacyName).catch(() => new Map<string, string>())
           : new Map<string, string>();
         const bucketMs = BUCKET_MS[args.period];
+        const groupKeys = nestedKeysOf(schema);
         const first = values[0] as string;
 
-        const shaped = rows.map((row: SeriesRow) => {
-          const { series, ...keys } = row;
-          const { t: _t, ...totals }: Rec = rollup(series, "total", bucketMs)[0] ?? { t: "" };
-          const mac = typeof keys.deviceMac === "string" ? keys.deviceMac.toLowerCase() : undefined;
-          return {
-            ...keys,
-            ...(mac && names.has(mac) ? { deviceName: names.get(mac) } : {}),
-            totals,
-            points: rollup(series, resolution, bucketMs),
-          };
-        });
-        shaped.sort((a, b) => numberOf(b.totals[first]) - numberOf(a.totals[first]));
+        // Totals first: they decide the order and the cut, and are small.
+        const ranked = rows
+          .map((row: SeriesRow) => {
+            const { series, ...keys } = row;
+            const { t: _t, ...totals }: Rec = rollup(series, "total", bucketMs, groupKeys)[0] ?? {
+              t: "",
+            };
+            const mac =
+              typeof keys.deviceMac === "string" ? keys.deviceMac.toLowerCase() : undefined;
+            return {
+              keys: { ...keys, ...(mac && names.has(mac) ? { deviceName: names.get(mac) } : {}) },
+              totals,
+              series,
+            };
+          })
+          .toSorted((a, b) => numberOf(b.totals[first]) - numberOf(a.totals[first]));
 
+        // `limit` bounds the series, not points x values: raw DAY over a client
+        // schema is ~68 KB a series. Coarsen until the answer fits, then cut
+        // series, and say which — a silently thinned answer reads as complete.
+        let kept = ranked.slice(0, args.limit);
+        let final = resolution;
+        let shaped: Rec[] = [];
+        for (const step of LADDER.slice(LADDER.indexOf(resolution))) {
+          final = step;
+          shaped = kept.map((r) => ({
+            ...r.keys,
+            totals: r.totals,
+            points: rollup(r.series, step, bucketMs, groupKeys),
+          }));
+          if (JSON.stringify(shaped).length <= OUTPUT_BUDGET) break;
+        }
+        while (kept.length > 1 && JSON.stringify(shaped).length > OUTPUT_BUDGET) {
+          kept = kept.slice(0, -1);
+          shaped = shaped.slice(0, kept.length);
+        }
+
+        const notes = [
+          ...(final === resolution
+            ? []
+            : [`Points were coarsened from ${resolution} to ${final} to keep the answer small.`]),
+          ...(kept.length < Math.min(args.limit, ranked.length)
+            ? [`Only the ${kept.length} busiest series fit; narrow with client or device.`]
+            : []),
+        ];
         return {
           ...header,
-          seriesTotal: shaped.length,
-          ...(shaped.length > args.limit ? { truncated: true } : {}),
-          series: shaped.slice(0, args.limit),
+          resolution: final,
+          ...(final === resolution ? {} : { coarsenedFrom: resolution }),
+          seriesTotal: ranked.length,
+          ...(kept.length < ranked.length ? { truncated: true } : {}),
+          ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+          series: shaped,
         };
       }),
   );

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
+import { withTimeout } from "#/client/stats";
 import type { SeriesRow, StatsEngine } from "#/client/stats";
 import { findHungRadios, formatMinutes, summarizeWan } from "#/client/stats-detect";
 import type { WanSummary } from "#/client/stats-detect";
@@ -38,36 +39,43 @@ const clock = (ms: number): string => new Date(ms).toTimeString().slice(0, 5);
  */
 const readHistory = async (stats: StatsEngine, legacyName: string): Promise<History> => {
   try {
-    const siteId = await stats.siteId(legacyName);
-    const [wireless, wan] = await Promise.all([
-      stats.series({
-        schema: "wirelessBySiteByDevice",
-        siteId,
-        period: "DAY",
-        values: ["distinctClientCount"],
-        nested: "byRadioBand",
-        // Everything the detector reads, and nothing else: unnarrowed, a day of
-        // five APs is 2.3 MB, and the legacy transport refuses 5 MB.
-        nestedValues: ["distinctClientCount", "rxBytes", "txBytes", "avgTotalCuPct"],
-      }),
-      stats.series({
-        schema: "wanBySite",
-        siteId,
-        period: "DAY",
-        values: [
-          "rxBytes",
-          "txBytes",
-          "avgAvailabilityPct",
-          "avgLatencyMs",
-          "maxLatencyMs",
-          "failoverS",
-        ],
-      }),
-    ]);
-    return { wireless, wan };
+    return await withTimeout(readSeries(stats, legacyName));
   } catch (err) {
     return { error: describe(err) };
   }
+};
+
+const readSeries = async (
+  stats: StatsEngine,
+  legacyName: string,
+): Promise<{ wireless: SeriesRow[]; wan: SeriesRow[] }> => {
+  const siteId = await stats.siteId(legacyName);
+  const [wireless, wan] = await Promise.all([
+    stats.series({
+      schema: "wirelessBySiteByDevice",
+      siteId,
+      period: "DAY",
+      values: ["distinctClientCount"],
+      nested: "byRadioBand",
+      // Everything the detector reads, and nothing else: unnarrowed, a day of
+      // five APs is 2.3 MB, and the legacy transport refuses 5 MB.
+      nestedValues: ["distinctClientCount", "rxBytes", "txBytes", "avgTotalCuPct"],
+    }),
+    stats.series({
+      schema: "wanBySite",
+      siteId,
+      period: "DAY",
+      values: [
+        "rxBytes",
+        "txBytes",
+        "avgAvailabilityPct",
+        "avgLatencyMs",
+        "maxLatencyMs",
+        "failoverS",
+      ],
+    }),
+  ]);
+  return { wireless, wan };
 };
 
 export const registerHealthTool = (

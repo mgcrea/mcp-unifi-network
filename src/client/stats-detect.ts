@@ -47,6 +47,28 @@ const MAX_BRIDGED = 2;
 
 type Bucket = { kind: "dead" | "blip" | "live"; ngClients: number };
 
+/** The 5 GHz band exists and moved no bytes, whatever 2.4 GHz was doing. */
+const fiveGhzSilent = (point: StatPoint): boolean => {
+  const na = band(point, "na");
+  return na !== undefined && num(na.rxBytes) + num(na.txBytes) === 0;
+};
+
+/**
+ * Whether 5 GHz stayed silent from just after `toMs` through the newest closed
+ * bucket, with no gap. A run's last DEAD bucket is not where the hang ended:
+ * flicker buckets and stretches with nobody on 2.4 GHz cannot extend a run, but
+ * they are not recovery either, and calling them recovery is a false all-clear.
+ */
+const silentThrough = (closed: StatPoint[], toMs: number, bucketMs: number): boolean => {
+  let expected = toMs + bucketMs;
+  for (const point of closed) {
+    if (point.timestamp <= toMs) continue;
+    if (point.timestamp !== expected || !fiveGhzSilent(point)) return false;
+    expected += bucketMs;
+  }
+  return true;
+};
+
 const classify = (point: StatPoint): Bucket => {
   const na = band(point, "na");
   const ngClients = num(band(point, "ng")?.distinctClientCount);
@@ -80,6 +102,7 @@ export const findHungRadios = (
       .toSorted((a, b) => a.timestamp - b.timestamp);
     const newest = closed.at(-1)?.timestamp;
 
+    const rowRuns: RadioRun[] = [];
     let run: { fromMs: number; toMs: number; ngClientsMax: number } | undefined;
     let lastMs = 0;
     let bridged = 0;
@@ -88,7 +111,12 @@ export const findHungRadios = (
       if (run) {
         const minutes = (run.toMs + bucketMs - run.fromMs) / 60_000;
         if (minutes >= minMinutes) {
-          runs.push({ mac, ...run, minutes, ongoing: run.toMs === newest });
+          rowRuns.push({
+            mac,
+            ...run,
+            minutes,
+            ongoing: run.toMs === newest || silentThrough(closed, run.toMs, bucketMs),
+          });
         }
       }
       run = undefined;
@@ -118,6 +146,9 @@ export const findHungRadios = (
       }
     }
     close();
+    // Only the latest run of an AP can be the one still going on.
+    for (const earlier of rowRuns.slice(0, -1)) earlier.ongoing = false;
+    runs.push(...rowRuns);
   }
   return runs;
 };

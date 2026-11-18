@@ -51,9 +51,16 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 
 const isGroupArray = (v: unknown): v is Rec[] => Array.isArray(v) && v.length > 0 && v.every(isRec);
 
-/** A string field of a nested entry that identifies it (`radioBand`), not a metric. */
-const isKeyField = (name: string, value: unknown): boolean =>
-  typeof value === "string" && !name.startsWith("mostCommon");
+/**
+ * The key fields of each nested group, by group name, from the schema
+ * (`{ byPort: ["portIdx"] }`). A key can be numeric, so it cannot be guessed
+ * from the values — without this, every port folds into one entry.
+ */
+export type NestedKeys = Record<string, string[]>;
+
+/** Fallback when the schema did not say: a string field (`radioBand`) is a key. */
+const isKeyField = (name: string, value: unknown, keys: string[] | undefined): boolean =>
+  keys ? keys.includes(name) : typeof value === "string" && !name.startsWith("mostCommon");
 
 const round = (metric: string, value: number): number =>
   /(Bytes|Packets)$/.test(metric) ? Math.round(value) : Math.round(value * 10) / 10;
@@ -105,7 +112,11 @@ const foldMetric = (metric: string, samples: { value: unknown; weight: number }[
 };
 
 /** Fold a set of records (points, or nested entries of one group) metric by metric. */
-const foldRecords = (records: { rec: Rec; weight: number }[], skip: Set<string>): Rec => {
+const foldRecords = (
+  records: { rec: Rec; weight: number }[],
+  skip: Set<string>,
+  nestedKeys: NestedKeys,
+): Rec => {
   const out: Rec = {};
   const names = new Set<string>();
   for (const { rec } of records) for (const name of Object.keys(rec)) names.add(name);
@@ -116,7 +127,11 @@ const foldRecords = (records: { rec: Rec; weight: number }[], skip: Set<string>)
     if (present.length === 0) continue;
 
     if (present.some(({ rec }) => isGroupArray(rec[name]))) {
-      out[name] = foldNested(present.map(({ rec, weight }) => ({ list: rec[name], weight })));
+      out[name] = foldNested(
+        present.map(({ rec, weight }) => ({ list: rec[name], weight })),
+        nestedKeys[name],
+        nestedKeys,
+      );
       continue;
     }
     out[name] = foldMetric(
@@ -128,7 +143,11 @@ const foldRecords = (records: { rec: Rec; weight: number }[], skip: Set<string>)
 };
 
 /** Nested arrays fold entry by entry, matched on their key fields, in first-seen order. */
-const foldNested = (lists: { list: unknown; weight: number }[]): Rec[] => {
+const foldNested = (
+  lists: { list: unknown; weight: number }[],
+  keyNames: string[] | undefined,
+  nestedKeys: NestedKeys,
+): Rec[] => {
   const groups = new Map<string, { keys: Rec; members: { rec: Rec; weight: number }[] }>();
   for (const { list, weight } of lists) {
     if (!Array.isArray(list)) continue;
@@ -136,7 +155,7 @@ const foldNested = (lists: { list: unknown; weight: number }[]): Rec[] => {
       if (!isRec(entry)) continue;
       const keys: Rec = {};
       for (const [name, value] of Object.entries(entry)) {
-        if (isKeyField(name, value)) keys[name] = value;
+        if (isKeyField(name, value, keyNames)) keys[name] = value;
       }
       const id = JSON.stringify(keys);
       const group = groups.get(id) ?? { keys, members: [] };
@@ -146,7 +165,7 @@ const foldNested = (lists: { list: unknown; weight: number }[]): Rec[] => {
   }
   return [...groups.values()].map(({ keys, members }) => ({
     ...keys,
-    ...foldRecords(members, new Set(Object.keys(keys))),
+    ...foldRecords(members, new Set(Object.keys(keys)), nestedKeys),
   }));
 };
 
@@ -175,6 +194,7 @@ export const rollup = (
   points: StatPoint[],
   resolution: Resolution,
   bucketMs: number,
+  nestedKeys: NestedKeys = {},
 ): RolledPoint[] => {
   const sorted = points.toSorted((a, b) => a.timestamp - b.timestamp);
   const newest = sorted.at(-1);
@@ -193,6 +213,7 @@ export const rollup = (
     const folded = foldRecords(
       group.map((rec) => ({ rec, weight: rec.duration })),
       new Set(["timestamp", "duration"]),
+      nestedKeys,
     );
     const partial = group.some((p) => p.timestamp === partialAt);
     return {

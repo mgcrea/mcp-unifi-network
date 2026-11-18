@@ -107,6 +107,26 @@ describe("rollup", () => {
     ]);
   });
 
+  // Review: a numeric key (portIdx) was taken for a metric, so every port
+  // folded into one entry with an averaged index.
+  it("matches nested entries on the schema's keys, numeric ones included", () => {
+    const out = rollup(
+      points(2, () => ({
+        byPort: [
+          { portIdx: 1, rxBytes: 10 },
+          { portIdx: 8, rxBytes: 5 },
+        ],
+      })),
+      "total",
+      FIVE_MIN,
+      { byPort: ["portIdx"] },
+    );
+    expect(out[0]?.byPort).toEqual([
+      { portIdx: 1, rxBytes: 20 },
+      { portIdx: 8, rxBytes: 10 },
+    ]);
+  });
+
   it("takes the most frequent value of a mostCommon metric", () => {
     const out = rollup(
       points(3, (i) => ({ mostCommonRadioProtocol: i === 0 ? "AC" : "N" })),
@@ -373,6 +393,22 @@ describe("findHungRadios", () => {
     const blip = { na: { rx: 0, tx: 0, cu: 2.1 }, ngClients: 8 };
     const runs = find(radioRow([...times(6, DEAD), blip, blip, blip, ...times(6, DEAD)]));
     expect(runs.map((r) => r.minutes)).toEqual([30, 30]);
+    // One hang, one warning: only the latest run of an AP can be the live one.
+    expect(runs.map((r) => r.ongoing)).toEqual([false, true]);
+  });
+
+  // Review: bridged or client-less buckets after the last dead one never moved
+  // `toMs`, so a radio still hung read as recovered — a false all-clear.
+  it("keeps a run ongoing when only bridged buckets follow it", () => {
+    const blip = { na: { rx: 0, tx: 0, cu: 1.2 }, ngClients: 6 };
+    const runs = find(radioRow([...times(10, DEAD), blip]));
+    expect(runs).toEqual([expect.objectContaining({ minutes: 50, ongoing: true })]);
+  });
+
+  it("keeps a run ongoing when 2.4 GHz empties but 5 GHz stays silent", () => {
+    const quiet = { na: { rx: 0, tx: 0, cu: 0 }, ngClients: 0 };
+    const runs = find(radioRow([...times(10, DEAD), quiet]));
+    expect(runs).toEqual([expect.objectContaining({ ongoing: true })]);
   });
 
   it("does not let trailing blips extend a run", () => {

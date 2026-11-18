@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { UnifiLegacyClient } from "#/client/legacy";
 import { rosterRecordsPastBlocks, summarizeKnownClient } from "#/client/legacy-shape";
+import { withTimeout } from "#/client/stats";
 import type { StatsEngine } from "#/client/stats";
 import { summarizeClientHistory } from "#/client/stats-detect";
 import { eq } from "#/filter";
@@ -227,38 +228,36 @@ export const registerDiagnoseTool = (
         const historyOf = async (mac: string): Promise<Rec> => {
           if (!stats) return {};
           try {
-            siteAndNames ??= Promise.all([
-              stats.siteId(name),
-              readDeviceNames(legacy, name).catch(() => new Map<string, string>()),
-            ]);
-            const [siteId, apNames] = await siteAndNames;
-            const [activity, roams] = await Promise.all([
-              stats.series({
-                schema: "activityBySiteByClient",
-                siteId,
-                period: "DAY",
-                match: { clientId: mac },
-                values: [
-                  "rxBytes",
-                  "txBytes",
-                  "durationMs",
-                  "avgSignalDbm",
-                  "avgSatisfactionScore",
-                ],
-                nested: "byDevice",
-              }),
-              stats.series({
-                schema: "roamBySiteByClient",
-                siteId,
-                period: "DAY",
-                match: { clientId: mac },
-                values: ["roamCount"],
-              }),
-            ]);
-            return summarizeClientHistory(activity, roams, apNames) ?? { empty: true };
+            return await withTimeout(readClientHistory(mac));
           } catch (err) {
             return { unavailable: describeError(err) };
           }
+        };
+        const readClientHistory = async (mac: string): Promise<Rec> => {
+          if (!stats) return {};
+          siteAndNames ??= Promise.all([
+            stats.siteId(name),
+            readDeviceNames(legacy, name).catch(() => new Map<string, string>()),
+          ]);
+          const [siteId, apNames] = await siteAndNames;
+          const [activity, roams] = await Promise.all([
+            stats.series({
+              schema: "activityBySiteByClient",
+              siteId,
+              period: "DAY",
+              match: { clientId: mac },
+              values: ["rxBytes", "txBytes", "durationMs", "avgSignalDbm", "avgSatisfactionScore"],
+              nested: "byDevice",
+            }),
+            stats.series({
+              schema: "roamBySiteByClient",
+              siteId,
+              period: "DAY",
+              match: { clientId: mac },
+              values: ["roamCount"],
+            }),
+          ]);
+          return summarizeClientHistory(activity, roams, apNames) ?? { empty: true };
         };
 
         let historyBudget = HISTORY_MATCHES;

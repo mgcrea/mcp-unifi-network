@@ -164,6 +164,12 @@ export const STATS_SCHEMAS = [
     ],
   },
   { name: "roamBySiteByClient", keys: ["siteId", "clientId"], values: ["roamCount"], nested: null },
+  {
+    name: "portBySiteByDevice",
+    keys: ["siteId", "deviceMac", "unitId"],
+    values: ["maxPoePowerW"],
+    nested: [{ name: "byPort", keys: ["portIdx"], values: ["rxBytes"], nested: null }],
+  },
 ];
 
 /** Consecutive engine points ending just before `end`, each built by `make(i)`. */
